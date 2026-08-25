@@ -13,7 +13,7 @@ scene = gs.Scene(
         camera_lookat=(0.0, 0.0, 0.5),
         camera_fov=40,
     ),
-    show_viewer=False,
+    show_viewer=True,
 )
 
 plane = scene.add_entity(

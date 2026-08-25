@@ -45,9 +45,8 @@ def main():
         gs.morphs.MJCF(
             file="xml/franka_emika_panda/panda.xml",
         ),
-        vis_mode="collision",
     )
-    scene.build()
+
 
     motors_dof = np.arange(7)
     fingers_dof = np.arange(7, 9)
