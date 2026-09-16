@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Notebook / inference outputs
+outputs/
+.ipynb_checkpoints/
+
+# Regression / run outputs
+regression_output/
+output/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+
+# OS
+.DS_Store
+Thumbs.db
+
+# NFS silly-rename artifacts
+.nfs*
+hf/
+out/
+
+# Training artifacts
+checkpoints/
+data/

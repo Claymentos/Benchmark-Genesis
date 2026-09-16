@@ -7,3 +7,9 @@
 [submodule "genesis/ext/ParticleMesher"]
 	path = genesis/ext/ParticleMesher
 	url = https://github.com/ACMLCZH/ParticleMesher
+[submodule "recgen"]
+	path = recgen
+	url = git@github.com:Claymentos/recgen.git
+[submodule "moge"]
+	path = moge
+	url = https://github.com/microsoft/MoGe.git

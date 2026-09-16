@@ -1,0 +1,137 @@
+Copyright (c) 2026 Toyota Research Institute. All rights reserved.
+
+The files in this repository are released under the terms below.
+
+===========================================================================
+TOYOTA RESEARCH INSTITUTE NON-COMMERCIAL LICENSE
+Applies to all files NOT listed under "Third-Party Components" below.
+===========================================================================
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files, to use, copy,
+modify, merge, publish, and distribute the software for NON-COMMERCIAL
+purposes only, subject to the following conditions:
+
+  1. The above copyright notice and this permission notice shall be included
+     in all copies or substantial portions of the software.
+
+  2. "Non-commercial" means research, evaluation, and personal use only.
+     Use in any product or service offered for sale, or in any activity
+     that generates revenue (directly or indirectly), requires a separate
+     written license from Toyota Research Institute
+     (contact: opensource@tri.global).
+
+  3. Redistributions in source or binary form must reproduce this license
+     in the documentation and/or other materials provided with the
+     distribution.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+TOYOTA RESEARCH INSTITUTE BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+Files covered by this license:
+  recgen_inference/inference.py
+  recgen_inference/build_recgen.py
+  recgen_inference/preprocessing.py
+  recgen_inference/_result.py
+  recgen_inference/utils.py
+  recgen_inference/__init__.py
+  recgen_inference/recgen_modules/models/sparse_structure_pose_flow.py
+  recgen_inference/recgen_modules/models/structured_latent_cond_flow.py
+  recgen_inference/recgen_modules/pipelines/recgen_pipeline.py
+  recgen_inference/recgen_modules/utils/pose_utils.py
+  scripts/
+  tests/
+
+===========================================================================
+THIRD-PARTY COMPONENTS
+===========================================================================
+
+--- 1. TRELLIS (MIT) ---
+
+The following files are derived from TRELLIS
+(https://github.com/microsoft/TRELLIS), copyright (c) Microsoft Corporation,
+and are used here under the MIT License:
+
+  recgen_inference/recgen_modules/modules/
+  recgen_inference/recgen_modules/models/sparse_elastic_mixin.py
+  recgen_inference/recgen_modules/models/sparse_structure_flow.py
+  recgen_inference/recgen_modules/models/sparse_structure_vae.py
+  recgen_inference/recgen_modules/models/structured_latent_vae/
+  recgen_inference/recgen_modules/pipelines/base.py
+  recgen_inference/recgen_modules/pipelines/samplers/
+  recgen_inference/recgen_modules/renderers/mesh_renderer.py
+  recgen_inference/recgen_modules/renderers/octree_renderer.py
+  recgen_inference/recgen_modules/representations/gaussian/gaussian_model.py
+  recgen_inference/recgen_modules/representations/mesh/cube2mesh.py
+  recgen_inference/recgen_modules/representations/mesh/utils_cube.py
+  recgen_inference/recgen_modules/representations/octree/
+  recgen_inference/recgen_modules/representations/radiance_field/
+  recgen_inference/recgen_modules/utils/elastic_utils.py
+  recgen_inference/recgen_modules/utils/postprocessing_utils.py
+  recgen_inference/recgen_modules/utils/random_utils.py
+  recgen_inference/recgen_modules/utils/render_utils.py
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--- 2. 3D Gaussian Splatting — Inria GRAPHDECO (non-commercial) ---
+
+The following files are adapted from the 3D Gaussian Splatting project
+(https://github.com/graphdeco-inria/gaussian-splatting),
+copyright (c) 2023 Inria, GRAPHDECO research group, and are free for
+non-commercial, research and evaluation use only. For commercial licensing
+contact george.drettakis@inria.fr.
+
+  recgen_inference/recgen_modules/representations/gaussian/general_utils.py
+  recgen_inference/recgen_modules/renderers/gaussian_render.py
+
+--- 3. PlenOctree (BSD 2-Clause) ---
+
+The following file is adapted from the PlenOctree project,
+copyright (c) 2021 The PlenOctree Authors:
+
+  recgen_inference/recgen_modules/renderers/sh_utils.py
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+  1. Redistributions of source code must retain the above copyright notice,
+     this list of conditions and the following disclaimer.
+  2. Redistributions in binary form must reproduce the above copyright notice,
+     this list of conditions and the following disclaimer in the documentation
+     and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED.
+
+--- 4. FlexiCubes (Apache 2.0) ---
+
+The following files are from NVIDIA's FlexiCubes project and are licensed
+under the Apache License, Version 2.0. See the full license text at:
+recgen_inference/recgen_modules/representations/mesh/flexicubes/LICENSE.txt
+
+  recgen_inference/recgen_modules/representations/mesh/flexicubes/

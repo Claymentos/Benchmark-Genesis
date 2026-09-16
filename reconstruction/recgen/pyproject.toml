@@ -1,0 +1,90 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "recgen_inference"
+version = "0.1.0"
+description = "RecGen: standalone inference for single-view and multi-view 3D reconstruction"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "LicenseRef-TRI-NC"}
+
+dependencies = [
+    "torch>=2.0",
+    "torchvision",
+    "numpy",
+    "scipy",
+    "Pillow",
+    "trimesh",
+    "safetensors",
+    "huggingface-hub",
+    "easydict",
+    "tqdm",
+    "plyfile",
+    "opencv-python-headless",
+]
+
+[project.optional-dependencies]
+# CUDA extensions — install separately based on your CUDA version:
+#   pip install spconv-cu118   (CUDA 11.8)
+#   pip install spconv-cu120   (CUDA 12.x)
+#   pip install flash-attn     (optional, for faster attention)
+
+# GLB texture export (heavy)
+glb = [
+    "xatlas",
+    "pyvista",
+    "pymeshfix",
+    "igraph",
+    "utils3d @ git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8",
+]
+
+# Notebook visualisation
+notebook = [
+    "jupyter",
+    "ipywidgets",
+    "matplotlib",
+    "imageio",
+    "imageio-ffmpeg",
+]
+
+# Training / fine-tuning (recgen_training package)
+train = [
+    "webdataset>=0.2",
+    "braceexpand",
+    "kornia>=0.7,<0.8",
+    "einops>=0.7",
+    "tensorboard>=2.14",
+    "wandb>=0.16",
+]
+
+# Evaluation (recgen_eval package: HB / ArtVIP paper evals).
+# Also needs the glb extra + nvdiffrast/diff_gaussian_rasterization CUDA builds
+# (bash scripts/setup_cuda.sh --all) and open3d/pyrender from the vis stack.
+eval = [
+    "pandas>=2.0",
+    "PyYAML>=6.0",
+    "scikit-learn>=1.3",
+    "open3d>=0.17,<0.18",
+    "imageio>=2.30",
+    "imageio-ffmpeg>=0.5",
+    "pyrender",
+]
+
+# Dev tools for tests + lint (used in CI)
+dev = [
+    "pytest",
+    "pre-commit",
+    "ruff",
+]
+
+# Everything
+all = ["recgen_inference[glb,notebook,dev,train,eval]"]
+
+[tool.setuptools.packages.find]
+include = ["recgen_inference*", "recgen_training*", "recgen_eval*"]
+
+[tool.setuptools.package-data]
+recgen_training = ["configs/**/*.json"]
+recgen_eval = ["configs/*.yaml", "splits/**/*.txt"]

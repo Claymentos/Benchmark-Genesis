@@ -1,0 +1,134 @@
+# ============================================================================
+# RecGen Inference — pixi project configuration
+#
+# Install:  curl -fsSL https://pixi.sh/install.sh | bash
+#
+# Usage:
+#   pixi install                       # default (CUDA 12.1, core only)
+#   pixi install -e cu118              # CUDA 11.8 variant
+#
+#   pixi run post-install              # install flash-attn (optional)
+#   pixi run build-nvdiffrast          # build nvdiffrast for GLB export
+#   pixi run build-gaussian-rasterizer # build diff_gaussian_rasterization for GLB export
+# ============================================================================
+
+[workspace]
+name = "recgen-inference"
+version = "0.1.0"
+description = "RecGen: standalone minimal inference"
+channels = ["pytorch", "nvidia", "conda-forge"]
+platforms = ["linux-64"]
+
+# ── Conda dependencies (shared) ─────────────────────────────────────────
+[dependencies]
+python = "3.10.*"
+pip = "*"
+numpy = ">=1.24,<2"
+cmake = ">=3.20"
+git = "*"
+ninja = "*"
+
+# ── Base feature: minimal inference ──────────────────────────────────────
+# Pin gcc/g++ 12 in the env so nvcc (CUDA 12.1) has a supported host compiler.
+# Ubuntu 24.04 ships gcc 13, which CUDA 12.1's host_config.h rejects.
+[feature.base.dependencies]
+gcc_linux-64 = "12.*"
+gxx_linux-64 = "12.*"
+sysroot_linux-64 = "2.17.*"
+
+[feature.base.pypi-dependencies]
+recgen_inference = { path = ".", editable = true }
+pillow = ">=9.0"
+scipy = ">=1.11"
+trimesh = ">=4.0"
+safetensors = ">=0.4"
+huggingface-hub = ">=0.20"
+easydict = ">=1.10"
+tqdm = ">=4.60"
+plyfile = ">=1.0"
+opencv-python-headless = ">=4.8"
+utils3d = { git = "https://github.com/EasternJournalist/utils3d.git", rev = "9a4eb15e4021b67b12c460c7057d642626897ec8" }
+
+# ── GLB export feature ──────────────────────────────────────────────────
+[feature.glb.pypi-dependencies]
+xatlas = ">=0.0.9"
+pyvista = ">=0.43"
+pymeshfix = ">=0.17"
+igraph = ">=0.11"
+# nvdiffrast must be built from source: pixi run build-nvdiffrast
+
+# ── Visualization feature ───────────────────────────────────────────────
+[feature.vis.pypi-dependencies]
+open3d = ">=0.17,<0.18"
+imageio = ">=2.30"
+imageio-ffmpeg = ">=0.5"
+opencv-python-headless = ">=4.8"
+pyrender = "*"
+
+# ── Training feature ────────────────────────────────────────────────────
+[feature.train.pypi-dependencies]
+webdataset = ">=0.2"
+braceexpand = "*"
+kornia = ">=0.7,<0.8"
+einops = ">=0.7"
+tensorboard = ">=2.14"
+wandb = ">=0.16"
+
+# ── Evaluation feature (recgen_eval: HB / ArtVIP paper evals) ───────────
+[feature.eval.pypi-dependencies]
+pandas = ">=2.0"
+pyyaml = ">=6.0"
+scikit-learn = ">=1.3"
+
+# ── CUDA 12.1 feature ───────────────────────────────────────────────────
+[feature.cu121]
+channels = ["pytorch", "nvidia/label/cuda-12.1.0", "nvidia", "conda-forge"]
+
+[feature.cu121.dependencies]
+pytorch = { version = "==2.4.0", channel = "pytorch" }
+torchvision = { version = "==0.19.0", channel = "pytorch" }
+pytorch-cuda = { version = "12.1.*", channel = "pytorch" }
+cuda-toolkit = { version = "12.1.*", channel = "nvidia/label/cuda-12.1.0" }
+cuda-nvcc = { version = "12.1.*", channel = "nvidia/label/cuda-12.1.0" }
+cuda-cccl = { version = "12.1.*", channel = "nvidia/label/cuda-12.1.0" }
+
+[feature.cu121.pypi-options]
+extra-index-urls = ["https://download.pytorch.org/whl/cu121"]
+
+[feature.cu121.pypi-dependencies]
+xformers = "==0.0.27.post2"
+spconv-cu120 = ">=2.3"
+
+# ── CUDA 11.8 feature ───────────────────────────────────────────────────
+[feature.cu118]
+channels = ["pytorch", "nvidia/label/cuda-11.8.0", "nvidia", "conda-forge"]
+
+[feature.cu118.dependencies]
+pytorch = { version = "==2.4.0", channel = "pytorch" }
+torchvision = { version = "==0.19.0", channel = "pytorch" }
+pytorch-cuda = { version = "11.8.*", channel = "pytorch" }
+cuda-nvcc = { version = "11.8.*", channel = "nvidia/label/cuda-11.8.0" }
+cuda-cudart-dev = { version = "11.8.*", channel = "nvidia/label/cuda-11.8.0" }
+cuda-libraries-dev = { version = "11.8.*", channel = "nvidia/label/cuda-11.8.0" }
+
+[feature.cu118.pypi-options]
+extra-index-urls = ["https://download.pytorch.org/whl/cu118"]
+
+[feature.cu118.pypi-dependencies]
+xformers = "==0.0.27.post2"
+spconv-cu118 = ">=2.3"
+
+# ── Environments ─────────────────────────────────────────────────────────
+[environments]
+default = { features = ["base", "cu121", "glb", "vis"], solve-group = "cu121" }
+cu118 = { features = ["base", "cu118", "glb", "vis"], solve-group = "cu118" }
+train = { features = ["base", "cu121", "glb", "vis", "train"], solve-group = "cu121" }
+cu118-train = { features = ["base", "cu118", "glb", "vis", "train"], solve-group = "cu118" }
+eval = { features = ["base", "cu121", "glb", "vis", "eval"], solve-group = "cu121" }
+cu118-eval = { features = ["base", "cu118", "glb", "vis", "eval"], solve-group = "cu118" }
+
+# ── Tasks ────────────────────────────────────────────────────────────────
+[tasks]
+post-install = { cmd = "python -m pip install psutil packaging && CUDA_HOME=$CONDA_PREFIX python -m pip install --no-build-isolation flash-attn || echo 'flash-attn skipped, will use SDPA fallback'", description = "Install flash-attn (optional)" }
+build-nvdiffrast = { cmd = "CUDA_HOME=$CONDA_PREFIX bash scripts/setup_cuda.sh --nvdiffrast", description = "Build nvdiffrast from source (needed for GLB export)" }
+build-gaussian-rasterizer = { cmd = "CUDA_HOME=$CONDA_PREFIX bash scripts/setup_cuda.sh --diff-gaussian", description = "Build diff_gaussian_rasterization from source (needed for GLB export)" }

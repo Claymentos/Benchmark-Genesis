@@ -1,0 +1,40 @@
+.git
+.gitignore
+.github
+.pixi
+pixi.lock
+
+# Build / packaging artefacts
+build/
+dist/
+*.egg-info/
+recgen_inference.egg-info/
+
+# Run outputs
+output/
+test_output/
+regression_output/
+
+# Notebook outputs
+notebooks/**/*.ipynb_checkpoints
+notebooks/**/outputs
+
+# Python caches
+**/__pycache__
+**/*.pyc
+**/*.pyo
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Env / editor
+.env
+.venv
+venv
+.vscode
+.idea
+
+# Docker itself
+Dockerfile
+.dockerignore
+docker-compose.yml
