@@ -41,6 +41,21 @@ def parse_args():
     parser.add_argument("--object", required=True)
     parser.add_argument("--intrinsics", required=True)
     parser.add_argument("--ground-plane", default=None)
+    parser.add_argument(
+        "--min-valid-frac",
+        type=float,
+        default=0.3,
+        help="Minimum fraction of the object mask carrying valid depth. Stereo depth "
+        "drops out on glossy surfaces, and a median over the few surviving pixels -- "
+        "often background seen through the holes -- places the object metres away.",
+    )
+    parser.add_argument(
+        "--anchor-smooth",
+        type=int,
+        default=9,
+        help="Window for smoothing the depth-derived scale and offset before they are "
+        "combined into a position; 0 disables",
+    )
     parser.add_argument("--rest-speed", type=float, default=0.004)
     parser.add_argument("--max-tilt", type=float, default=30.0)
     parser.add_argument("--smooth-window", type=int, default=9)
@@ -98,6 +113,9 @@ def main():
 
     depth_files = sorted(f for f in os.listdir(args.depth_dir) if f.endswith(".png"))
     anchored = np.zeros(n_frames, dtype=bool)
+    hand_positions = np.zeros((n_frames, 3))
+    offsets = np.zeros((n_frames, 3))
+    ratios = np.ones(n_frames)
 
     import cv2
 
@@ -130,24 +148,65 @@ def main():
             continue
 
         ys, xs = np.nonzero(object_mask)
-        object_points, _ = back_project(xs, ys, depth, fu, fv, pu, pv)
-        if len(object_points) < 50:
+        object_points, object_sampled = back_project(xs, ys, depth, fu, fv, pu, pv)
+        if len(object_points) < 50 or object_sampled.mean() < args.min_valid_frac:
             continue
         object_from_depth = np.median(object_points, axis=0)
 
-        ratio = hand_real[2] / hand_from_depth[2]
-        translations[t] = (
-            hand_real + ratio * (object_from_depth - hand_from_depth) - rotations[t] @ centroid
-        )
+        hand_positions[t] = hand_real
+        ratios[t] = hand_real[2] / hand_from_depth[2]
+        offsets[t] = object_from_depth - hand_from_depth
         anchored[t] = True
+
+    # The depth-derived terms are independent per-frame medians, so they carry the
+    # depth map's noise straight into the object's position -- which measurement
+    # showed to be essentially all of the residual jitter. Smooth them before
+    # combining rather than trying to filter the result afterwards: the scale ratio
+    # in particular is a slowly-varying calibration between two depth sources, not a
+    # per-frame signal, and its noise multiplies the whole hand-to-object offset.
+    if anchored.any() and args.anchor_smooth >= 3:
+        from scipy.ndimage import uniform_filter1d
+
+        order = np.flatnonzero(anchored)
+        window = min(args.anchor_smooth, len(order))
+        if window >= 3:
+            # Smooth along real time, not along the compacted list of anchored frames:
+            # anchoring drops out during occlusions, so neighbours in that list can be
+            # many frames apart, and filtering them as adjacent mixes distant values.
+            timeline = np.arange(n_frames)
+            ratio_full = np.interp(timeline, order, ratios[order])
+            offset_full = np.stack(
+                [np.interp(timeline, order, offsets[order, axis]) for axis in range(3)], axis=1
+            )
+            ratios[order] = uniform_filter1d(ratio_full, window, mode="nearest")[order]
+            offsets[order] = uniform_filter1d(offset_full, window, axis=0, mode="nearest")[order]
+
+    for t in np.flatnonzero(anchored):
+        translations[t] = (
+            hand_positions[t] + ratios[t] * offsets[t] - rotations[t] @ centroid
+        )
 
     if anchored.sum() >= 2:
         # Frames without a usable hand or object mask keep the tracker's own
         # translation, bridged so the two sources do not step against each other.
+        # Linear rather than a smoother interpolant on purpose: PCHIP was measurably
+        # worse here (p95 jerk 6.4 -> 7.3 mm). These gaps are occlusions, so the
+        # residual jerk comes from the missing data, not from the bridge's continuity.
         order = np.flatnonzero(anchored)
         span = np.arange(order[0], order[-1] + 1)
+        interior = translations[order].copy()
         for axis in range(3):
-            translations[span, axis] = np.interp(span, order, translations[order, axis])
+            translations[span, axis] = np.interp(span, order, interior[:, axis])
+
+        # Frames outside the anchored range keep the tracker's own translation, which
+        # is a different estimator and generally disagrees with the anchored one by a
+        # near-constant offset. Left as-is that shows up as a single hard step at the
+        # boundary -- it was the entire p99 tail on grasping_cup. Carrying the
+        # boundary offset outwards keeps the tracker's motion but removes the step.
+        for edge, direction in ((order[0], -1), (order[-1], 1)):
+            outside = np.arange(edge + direction, -1 if direction < 0 else n_frames, direction)
+            if len(outside):
+                translations[outside] += translations[edge] - tracked["translation"][edge]
 
     resting = np.zeros(n_frames, dtype=bool)
     if args.ground_plane:
@@ -165,6 +224,9 @@ def main():
         translation=translations,
         valid=valid,
         inliers=tracked["inliers"],
+        # v(t) is carried through unchanged: anchoring rewrites where the object is,
+        # not how well the frame was observed, and downstream stages gate on it.
+        confidence=tracked["confidence"] if "confidence" in tracked else np.zeros(n_frames),
         resting=resting,
         anchored=anchored,
         ref_frame=tracked["ref_frame"],

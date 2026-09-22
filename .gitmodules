@@ -13,3 +13,9 @@
 [submodule "moge"]
 	path = moge
 	url = https://github.com/microsoft/MoGe.git
+[submodule "co-tracker"]
+	path = co-tracker
+	url = https://github.com/facebookresearch/co-tracker.git
+[submodule "reconstruction/lightning-grasp"]
+	path = reconstruction/lightning-grasp
+	url = https://github.com/zhaohengyin/lightning-grasp.git

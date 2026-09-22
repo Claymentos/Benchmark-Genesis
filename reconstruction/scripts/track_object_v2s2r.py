@@ -35,7 +35,19 @@ def parse_args():
     parser.add_argument("--num-points", type=int, default=256)
     parser.add_argument("--resize", type=int, nargs=2, default=[256, 256])
     parser.add_argument("--vis-threshold", type=float, default=0.5)
-    parser.add_argument("--min-points", type=int, default=8, help="Minimum inliers to accept a pose")
+    parser.add_argument(
+        "--min-points",
+        type=int,
+        default=15,
+        help="Minimum inliers to accept a pose; below roughly 15 non-collinear "
+        "correspondences the rigid solve is not meaningfully constrained",
+    )
+    parser.add_argument(
+        "--low-confidence",
+        type=float,
+        default=0.1,
+        help="Report how many frames fall below this normalised inlier fraction",
+    )
     parser.add_argument(
         "--chunk",
         type=int,
@@ -120,24 +132,58 @@ def lift(points_2d, depth, fu, fv, pu, pv, patch=2):
     return np.stack([(x - pu) * z / fu, (y - pv) * z / fv, z], axis=1), valid
 
 
-def clean_poses(rotations, translations, valid, max_step, max_turn, smooth_window):
-    """Drop physically impossible frames, then interpolate and smooth what remains.
+def smooth_on_manifold(translations, rotations, window, confidence=None):
+    """Smooth a pose sequence by weighted averaging over a sliding window.
+
+    Rotations are averaged with scipy's Karcher/chordal mean rather than by filtering
+    quaternion components independently and renormalising, which is not a manifold
+    operation and distorts orientation when the window spans a large turn.
+
+    `confidence` down-weights frames the rigid solve was unsure about, so a pose
+    recovered from a handful of inliers is pulled toward its better-observed
+    neighbours instead of dragging them toward it.
+    """
+    from scipy.spatial.transform import Rotation
+
+    half = window // 2
+    offsets = np.arange(-half, half + 1)
+    kernel = np.exp(-0.5 * (offsets / (half / 2.0)) ** 2)
+
+    n_frames = len(translations)
+    smoothed_translations = np.empty_like(translations)
+    smoothed_rotations = []
+
+    for index in range(n_frames):
+        neighbours = np.clip(index + offsets, 0, n_frames - 1)
+        weights = kernel.copy()
+        if confidence is not None:
+            weights = weights * np.clip(confidence[neighbours], 1e-3, None)
+        weights /= weights.sum()
+
+        smoothed_translations[index] = weights @ translations[neighbours]
+        smoothed_rotations.append(rotations[neighbours].mean(weights=weights))
+
+    return smoothed_translations, Rotation.concatenate(smoothed_rotations)
+
+
+def gate_poses(rotations, translations, valid, max_step, max_turn):
+    """Drop frames whose solved pose cannot follow from the one before it.
 
     A near-cylindrical, textureless object leaves rotation about its axis weakly
     observable, so individual frames can solve to wild orientations while still
     reprojecting near the mask. Continuity is the constraint that catches those.
+
+    Continuity, not distance from a reference pose: the object legitimately travels
+    far (here the mug is lifted and set back down), so only an implausible jump
+    between neighbouring frames indicates a bad solve.
     """
-    from scipy.signal import savgol_filter
-    from scipy.spatial.transform import Rotation, Slerp
+    from scipy.spatial.transform import Rotation
 
     valid = valid.copy()
     order = np.flatnonzero(valid)
     if len(order) < 3:
-        return rotations, translations, valid
+        return valid
 
-    # Continuity, not distance from a reference pose: the object legitimately travels
-    # far (here the mug is lifted and set back down), so only an implausible jump
-    # between neighbouring frames indicates a bad solve.
     anchor = order[0]
     for index in order[1:]:
         gap = index - anchor
@@ -149,7 +195,15 @@ def clean_poses(rotations, translations, valid, max_step, max_turn, smooth_windo
             valid[index] = False
         else:
             anchor = index
+    return valid
 
+
+def clean_poses(rotations, translations, valid, max_step, max_turn, smooth_window, confidence=None):
+    """Drop physically impossible frames, then interpolate and smooth what remains."""
+    from scipy.signal import savgol_filter
+    from scipy.spatial.transform import Rotation, Slerp
+
+    valid = gate_poses(rotations, translations, valid, max_step, max_turn)
     order = np.flatnonzero(valid)
     if len(order) < 3:
         return rotations, translations, valid
@@ -163,14 +217,8 @@ def clean_poses(rotations, translations, valid, max_step, max_turn, smooth_windo
 
     window = min(smooth_window, len(span) - (1 - len(span) % 2))
     if window >= 5:
-        filled_translations = savgol_filter(filled_translations, window, 2, axis=0)
-        quaternions = filled_rotations.as_quat()
-        flips = np.cumprod(
-            np.r_[1, np.where((quaternions[1:] * quaternions[:-1]).sum(axis=1) < 0, -1, 1)]
-        )
-        quaternions = savgol_filter(quaternions * flips[:, None], window, 2, axis=0)
-        filled_rotations = Rotation.from_quat(
-            quaternions / np.linalg.norm(quaternions, axis=1, keepdims=True)
+        filled_translations, filled_rotations = smooth_on_manifold(
+            filled_translations, filled_rotations, window, confidence[span] if confidence is not None else None
         )
 
     rotations = rotations.copy()
@@ -271,15 +319,13 @@ def apply_ground_constraint(
     window = min(smooth_window, len(order) - (1 - len(order) % 2))
     if window >= 5:
         # Snapping resting frames introduces steps at the rest/held boundaries.
-        translations[order] = savgol_filter(translations[order], window, 2, axis=0)
-        quaternions = Rotation.from_matrix(rotations[order]).as_quat()
-        flips = np.cumprod(
-            np.r_[1, np.where((quaternions[1:] * quaternions[:-1]).sum(axis=1) < 0, -1, 1)]
+        # This is the last smoothing the trajectory sees -- it runs after the
+        # anchoring step rewrites translations -- so it has to be the manifold one.
+        smoothed_translations, smoothed_rotations = smooth_on_manifold(
+            translations[order], Rotation.from_matrix(rotations[order]), window
         )
-        quaternions = savgol_filter(quaternions * flips[:, None], window, 2, axis=0)
-        rotations[order] = Rotation.from_quat(
-            quaternions / np.linalg.norm(quaternions, axis=1, keepdims=True)
-        ).as_matrix()
+        translations[order] = smoothed_translations
+        rotations[order] = smoothed_rotations.as_matrix()
 
         for index in order:
             lowest = ((vertices @ rotations[index].T + translations[index]) @ normal + offset).min()
@@ -412,9 +458,16 @@ def main():
         inlier_counts[t] = int(inliers.sum())
         valid[t] = True
 
+    # v(t): how well-observed each frame's solve was, as a fraction of the points
+    # tracked on the object. This is the signal that says where vision alone suffices
+    # and where it collapses -- consumers should gate on it rather than on `valid`,
+    # which only records that a solve succeeded at all.
+    confidence = inlier_counts / float(len(queries))
+
     solved = int(valid.sum())
     rotations, translations, valid = clean_poses(
-        rotations, translations, valid, args.max_step, args.max_turn, args.smooth_window
+        rotations, translations, valid, args.max_step, args.max_turn, args.smooth_window,
+        confidence=confidence,
     )
 
     resting = np.zeros(n_frames, dtype=bool)
@@ -436,12 +489,18 @@ def main():
         translation=translations,
         valid=valid,
         inliers=inlier_counts,
+        confidence=confidence,
         resting=resting,
         ref_frame=args.ref_frame,
     )
     print(f"Wrote {args.out}: {solved}/{n_frames} frames solved, {valid.sum()} after cleanup")
     if valid.any():
         print(f"  median inliers {np.median(inlier_counts[valid]):.0f} of {len(queries)} points")
+        weak = int((confidence[valid] < args.low_confidence).sum())
+        print(
+            f"  confidence v(t): median {np.median(confidence[valid]):.2f}, "
+            f"{weak} frames below {args.low_confidence:.2f}"
+        )
 
 
 if __name__ == "__main__":
