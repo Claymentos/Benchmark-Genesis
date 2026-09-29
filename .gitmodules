@@ -19,3 +19,12 @@
 [submodule "reconstruction/lightning-grasp"]
 	path = reconstruction/lightning-grasp
 	url = https://github.com/zhaohengyin/lightning-grasp.git
+[submodule "HOPformer"]
+	path = HOPformer
+	url = https://github.com/Sid2697/HOPformer.git
+[submodule "reconstruction/HOPformer"]
+	path = reconstruction/HOPformer
+	url = https://github.com/Sid2697/HOPformer.git
+[submodule "reconstruction/ec-fit"]
+	path = reconstruction/ec-fit
+	url = git@github.com:ZJHTerry18/ec-fit.git

@@ -1,3 +1,11 @@
+reconstruction/touchanything/
+reconstruction/human_videos/
+reconstruction/epic-contact/
+reconstruction/co-tracker/saved_videos/
+reconstruction/co-tracker/gradio_demo/videos/
+__pycache__/
+*.egg-info/
+*.mp4
 logs/
 tmp/
 MUJOCO_LOG.TXT

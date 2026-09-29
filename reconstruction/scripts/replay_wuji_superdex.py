@@ -34,7 +34,7 @@ from scipy.spatial.transform import Rotation
 
 DEFAULT_WUJI_DIR = os.environ.get(
     "WUJI_RETARGETING_DIR",
-    "/home/cl-ment-prigent/wuji-ego-mint/eval/simulate/wuji-retargeting",
+    os.path.expanduser("~/wuji-ego-mint/eval/simulate/wuji-retargeting"),
 )
 
 

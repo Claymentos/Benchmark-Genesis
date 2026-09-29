@@ -1,0 +1,101 @@
+# `moge` env: explicitly requested conda packages + pinned pip packages.
+# Create with:  conda env create -f envs/moge.yml
+# Installed from local checkouts, so not listed below. Afterwards, in this env:
+#   pip install -e ~/MoGe
+name: moge
+channels:
+- defaults
+dependencies:
+- pip=26.2.1
+- python=3.10
+- pip:
+  - annotated-doc==0.0.5
+  - annotated-types==0.8.0
+  - anyio==4.15.1
+  - brotli==1.2.0
+  - certifi==2026.7.22
+  - charset-normalizer==3.5.1
+  - click==8.5.0
+  - contourpy==1.3.2
+  - cuda-bindings==13.4.1
+  - cuda-pathfinder==1.8.1
+  - cuda-toolkit==13.0.3.0
+  - cycler==0.12.1
+  - exceptiongroup==1.3.1
+  - fastapi==0.141.1
+  - filelock==3.32.6
+  - flex_gemm @ git+https://github.com/JeffreyXiang/FlexGEMM.git@b2fadb29d41846c7981ade6801ffc689fae119cf
+  - fonttools==4.65.0
+  - fsspec==2026.7.0
+  - glcontext==3.0.0
+  - gradio==6.27.0
+  - gradio-client==2.7.0
+  - groovy==0.1.2
+  - h11==0.16.0
+  - hf-gradio==0.4.1
+  - hf-xet==1.6.0
+  - httpcore==1.0.9
+  - httpx==0.28.1
+  - huggingface-hub==1.31.0
+  - idna==3.19
+  - jinja2==3.1.6
+  - kiwisolver==1.5.1
+  - markdown-it-py==4.2.0
+  - markupsafe==3.0.3
+  - matplotlib==3.10.9
+  - mdurl==0.1.2
+  - moderngl==5.12.0
+  - mpmath==1.3.0
+  - networkx==3.4.2
+  - numpy==2.2.6
+  - nvidia-cublas==13.1.1.3
+  - nvidia-cuda-cupti==13.0.85
+  - nvidia-cuda-nvrtc==13.0.88
+  - nvidia-cuda-runtime==13.0.96
+  - nvidia-cudnn-cu13==9.24.0.43
+  - nvidia-cufft==12.0.0.61
+  - nvidia-cufile==1.15.1.6
+  - nvidia-curand==10.4.0.35
+  - nvidia-cusolver==12.0.4.66
+  - nvidia-cusparse==12.6.3.3
+  - nvidia-cusparselt-cu13==0.8.1
+  - nvidia-nccl-cu13==2.30.7
+  - nvidia-nvjitlink==13.4.52
+  - nvidia-nvshmem-cu13==3.4.5
+  - nvidia-nvtx==13.0.85
+  - opencv-python-headless==5.0.0.93
+  - orjson==3.12.0
+  - pandas==2.3.3
+  - pillow==12.3.0
+  - pipeline @ git+https://github.com/EasternJournalist/pipeline.git@1c511390d90226c00c101f34b84df26a0f8789b4
+  - pydantic==2.13.5
+  - pydantic-core==2.46.5
+  - pydub==0.25.1
+  - pygments==2.21.0
+  - pyparsing==3.3.2
+  - python-dateutil==2.9.0.post0
+  - python-multipart==0.0.32
+  - pytz==2026.3.post1
+  - pyyaml==6.0.3
+  - requests==2.34.2
+  - rich==15.0.0
+  - safehttpx==0.1.7
+  - scipy==1.15.3
+  - semantic-version==2.10.0
+  - shellingham==1.5.4
+  - six==1.17.0
+  - starlette==1.6.0
+  - sympy==1.14.0
+  - tomlkit==0.14.0
+  - torch==2.14.0
+  - torchvision==0.29.0
+  - tqdm==4.70.1
+  - trimesh==5.1.0
+  - triton==3.8.0
+  - typer==0.27.2
+  - typing-extensions==4.16.0
+  - typing-inspection==0.4.4
+  - tzdata==2026.4
+  - urllib3==2.7.0
+  - utils3d_moge @ git+https://github.com/EasternJournalist/utils3d-moge.git@62f09d58509485564e24d5d9f6aac9ee9ebc0c37
+  - uvicorn==0.53.0

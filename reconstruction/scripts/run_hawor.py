@@ -20,7 +20,7 @@ import torch
 
 DEFAULT_HAWOR_DIR = os.environ.get(
     "HAWOR_DIR",
-    "/home/cl-ment-prigent/do-as-i-do/reconstruction/modules/HaWoR",
+    os.path.expanduser("~/do-as-i-do/reconstruction/modules/HaWoR"),
 )
 
 

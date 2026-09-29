@@ -26,7 +26,11 @@
 set -eo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$HERE/config/paths.sh"
+source "$HERE/../config/paths.sh"
+# Scripts only these legacy pipelines use live in legacy/scripts; they still import
+# shared modules (e.g. track_object_v2s2r) from $SCRIPTS_DIR.
+LEGACY_SCRIPTS_DIR="$HERE/scripts"
+export PYTHONPATH="$SCRIPTS_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
 # ──────────────────────────── Per-run inputs (args) ────────────────────────────
 VIDEO_PATH="${1:?usage: run_reconstruction_pipeline.sh VIDEO_PATH [FRAME_N] [OBJECT] [ANCHOR_HAND]}"
@@ -272,7 +276,7 @@ for OBJ_NAME in "${OBJECT_NAMES[@]}"; do
     echo "=== Anchoring $OBJECT_ID depth to the hand ==="
     # Kept separate from tracking so the anchoring can be re-tuned without paying for
     # another TAPIR pass.
-    python anchor_object_to_hand.py \
+    python "$LEGACY_SCRIPTS_DIR/anchor_object_to_hand.py" \
         --object-traj "$OBJECT_TRAJ_RAW" \
         --hand-meshes "$HAND_MESHES_PATH" \
         --side "$ANCHOR_HAND" \
@@ -306,7 +310,7 @@ python replay_wuji_genesis.py \
 # that pose into a constraint, so the arm's joint angles are solved per frame.
 if [ "$SKIP_FRANKA" != "1" ]; then
     echo "=== Solving Franka arm trajectory ==="
-    python solve_franka_ik.py \
+    python "$LEGACY_SCRIPTS_DIR/solve_franka_ik.py" \
         --traj "$WUJI_TRAJ" \
         --urdf "$FRANKA_WUJI_URDF" \
         --object-mesh "$VIDEO_DIR/recgen_out_$DEPTH_SOURCE/$FIRST_OBJECT/posed_mesh.obj" \

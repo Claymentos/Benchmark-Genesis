@@ -77,6 +77,10 @@ def parse_args():
     parser.add_argument("--min-grasp", type=int, default=8, help="Shorter contact runs are dropped")
     parser.add_argument("--keyframes", default="onset,middle,release",
                         help="Which moment of each grasp window to take")
+    parser.add_argument("--keyframes-json", default=None,
+                        help="keyframes.json from extract_keyframes.py. Uses Video2Sim2Real's "
+                             "object-centric keyframes instead of this script's hand-centric "
+                             "grasp windows, which is what its refinement anchors on")
 
     # Lightning Grasp's own knobs; the defaults follow its demo.
     parser.add_argument("--per-keyframe", action="store_true",
@@ -91,7 +95,38 @@ def parse_args():
     parser.add_argument("--n-sample-point", type=int, default=2048)
     parser.add_argument("--ik-finetune-iter", type=int, default=5)
     parser.add_argument("--zo-lr-sigma", type=float, default=5.0)
+    parser.add_argument("--support-radius", type=float, default=0.01,
+                        help="Lightning Grasp's concave-point filter (paper section 5.1): a "
+                             "point is dropped when material stands proud within this radius "
+                             "of it, since a finger could not reach in. The default is its "
+                             "demo's. It is a probe size, so it must suit the feature being "
+                             "grasped: at 10 mm only 11%% of a mug handle's inner wall "
+                             "survives against 45%% of its outer, which leaves the search "
+                             "able to wrap the handle from outside but not to reach through "
+                             "it. 5 mm doubles the inner surface")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--part", default=None,
+                        help="part_<name>.npz from label_mesh_part.py: the mesh subset a "
+                             "region of the object occupies, such as a handle")
+    parser.add_argument("--part-mode", choices=("restrict", "stratify"), default="restrict",
+                        help="restrict: Lightning Grasp may only place contacts on the "
+                             "part, so every grasp it returns holds the object there. "
+                             "stratify: the part is merely over-represented among the "
+                             "placements, and grasps elsewhere are still allowed")
+    parser.add_argument("--part-share", type=float, default=0.5,
+                        help="With --part-mode stratify, the share of placements drawn "
+                             "from the part")
+    parser.add_argument("--seed-from-demo", action="store_true",
+                        help="Sample object placements around the hand-object transform the "
+                             "demonstration had at the contact keyframe, instead of "
+                             "uniformly. Lightning Grasp draws the hand-side contact "
+                             "direction isotropically, so without this the candidates' "
+                             "wrist roll is uniform over the sphere and matching the human "
+                             "is luck -- 85 degrees away at best over 132 candidates here")
+    parser.add_argument("--seed-cone", type=float, default=35.0,
+                        help="Half-angle the seeded contact direction is sampled within, degrees")
+    parser.add_argument("--seed-radius", type=float, default=0.03,
+                        help="Radius the seeded contact position is sampled within, metres")
 
     # Scoring a candidate against the demonstration.
     parser.add_argument("--rotation-weight", type=float, default=0.05,
@@ -103,6 +138,22 @@ def parse_args():
     parser.add_argument("--keep", type=int, default=16,
                         help="Candidates stored per keyframe, best first")
     return parser.parse_args()
+
+
+def v2s2r_keyframes(args, valid):
+    """The object-centric keyframes extract_keyframes.py found, as (frame, label) pairs."""
+    with open(args.keyframes_json) as handle:
+        found = json.load(handle)["keyframes"]
+    keyframes = []
+    for name, frame in found.items():
+        if frame is None:
+            continue
+        if not valid[frame]:
+            print(f"[keyframes] {name} frame {frame} has no solved object pose, skipped")
+            continue
+        keyframes.append((int(frame), name))
+    print(f"[keyframes] Video2Sim2Real keyframes: {keyframes}")
+    return sorted(keyframes), np.zeros((0, 2), dtype=int)
 
 
 def grasp_keyframes(args, rotation, translation, valid):
@@ -141,6 +192,106 @@ def grasp_keyframes(args, rotation, translation, valid):
             if valid[frame] and frame not in [k for k, _ in keyframes]:
                 keyframes.append((frame, f"{name}@{start}-{stop - 1}"))
     return sorted(keyframes), windows
+
+
+def cone_perturb(directions, half_angle):
+    """Rotate each direction by a random angle up to `half_angle`, uniform on the cap."""
+    count = len(directions)
+    cosines = 1.0 - np.random.rand(count) * (1.0 - np.cos(half_angle))
+    sines = np.sqrt(np.maximum(1.0 - cosines ** 2, 0.0))
+    azimuth = np.random.rand(count) * 2 * np.pi
+    local = np.stack([sines * np.cos(azimuth), sines * np.sin(azimuth), cosines], axis=1)
+
+    # A frame per direction, with z along it.
+    axis = np.tile(np.array([0.0, 0.0, 1.0]), (count, 1))
+    axis[np.abs(directions[:, 2]) > 0.9] = np.array([1.0, 0.0, 0.0])
+    x = np.cross(axis, directions)
+    x /= np.linalg.norm(x, axis=1, keepdims=True)
+    y = np.cross(directions, x)
+    return np.einsum("nij,nj->ni", np.stack([x, y, directions], axis=2), local)
+
+
+def demonstration_object_poses(n, points, normals, prior, tree, mesh_data):
+    """Object placements drawn around the transform the demonstration had.
+
+    Replaces Lightning Grasp's own sampler for this case. Its version pairs a random
+    object point with an independently drawn hand contact, which is what makes the
+    wrist roll uniform over the sphere; here the two are paired on purpose. For an
+    object point of normal n, the hand contact direction that reproduces the
+    demonstrated transform M is -(R_M n) and the contact position is M p, so each
+    point carries its own target and the cone is applied per point rather than around
+    an average of them. Averaging was the first attempt and it does not survive the
+    handle's shape: the normals sweep round the C, so their mean points nowhere in
+    particular.
+    """
+    import torch
+
+    from lygra.pipeline.module.collision import batch_object_hand_collision_check
+    from lygra.pipeline.module.object_placement import get_align_transform
+
+    # The same point set the contact stages will use, so a restricted region seeds the
+    # placements as well as the contacts; reading the context here instead would place
+    # the whole object while only its part was allowed to touch.
+    cloud_points = points.cpu().numpy()
+    cloud_normals = normals.cpu().numpy()
+    rotation, translation = prior["rotation"], prior["translation"]
+
+    index = np.random.randint(0, len(cloud_points), n)
+    object_points, object_normals = cloud_points[index], cloud_normals[index]
+
+    targets = -(object_normals @ rotation.T)
+    targets /= np.linalg.norm(targets, axis=1, keepdims=True)
+    directions = cone_perturb(targets, np.radians(prior["cone"]))
+
+    centres = object_points @ rotation.T + translation
+    offsets = np.random.randn(n, 3)
+    offsets *= (prior["radius"] * np.random.rand(n, 1) ** (1 / 3)
+                / np.linalg.norm(offsets, axis=1, keepdims=True))
+    positions = centres + offsets
+
+    transforms = np.array([
+        get_align_transform(object_points[i], object_normals[i], positions[i], directions[i])
+        for i in range(n)
+    ])
+    poses = torch.from_numpy(transforms).cuda().float()
+
+    cloud = points.unsqueeze(0).expand(len(poses), -1, -1)
+    moved = torch.bmm(cloud, poses[:, :3, :3].transpose(-1, -2)) + poses[:, :3, 3].unsqueeze(1)
+    free = batch_object_hand_collision_check(tree=tree, mesh=mesh_data, object_point=moved)
+    keep = torch.where(free)
+
+    zeros = torch.zeros((len(poses), 1, 3), device=poses.device)
+    condition = {
+        "extra_contact_pos": zeros[keep],
+        "extra_contact_normal": zeros[keep],
+        "extra_contact_mask": torch.zeros((len(poses), 1), device=poses.device)[keep],
+    }
+    return poses[keep], condition
+
+
+def seed_placement(context, palm_rotation, palm_position, object_rotation,
+                   object_translation, cone, radius):
+    """Bias object placement toward the hand-object transform the human had.
+
+    Lightning Grasp places the object by aligning one of its surface points to a
+    sampled hand contact (position p, outward normal d), with d drawn uniformly over
+    the sphere. That is the right prior with no demonstration; with one it throws away
+    the thing worth keeping, because the wrist roll the human used is one direction
+    among all of them.
+
+    This records the demonstrated transform M = T_palm<-object on the context;
+    demonstration_object_poses turns it into placements, one target per object point.
+    """
+    inverse_palm = palm_rotation.T
+    context["demo_prior"] = dict(
+        rotation=inverse_palm @ object_rotation,
+        translation=inverse_palm @ (object_translation - palm_position),
+        cone=cone,
+        radius=radius,
+    )
+    print(f"[lygra] placements seeded from the demonstration: each contact direction "
+          f"within {cone:.0f} deg of the one that reproduces the demonstrated transform, "
+          f"position within {100 * radius:.0f} cm of it")
 
 
 def build_context(args, robot_name):
@@ -191,7 +342,31 @@ def build_context(args, robot_name):
     points_np, normals_np = target.sample_point_and_normal(count=args.n_sample_point)
     points_all = torch.from_numpy(points_np).cuda().float()
     normals_all = torch.from_numpy(normals_np).cuda().float()
-    support = get_support_point_mask(points_all, normals_all, [0.01])[0]
+    support = get_support_point_mask(points_all, normals_all, [args.support_radius])[0]
+
+    # A part label lives on mesh vertices; the sampled points take the label of the
+    # vertex nearest each of them.
+    part = None
+    if args.part:
+        import trimesh
+        from scipy.spatial import cKDTree
+
+        stored = np.load(args.part, allow_pickle=True)
+        labels = stored["vertices"] if hasattr(stored, "files") else stored
+        vertices = np.asarray(trimesh.load(args.mesh, process=False).vertices)
+        if len(labels) != len(vertices):
+            raise SystemExit(f"{args.part} has {len(labels)} labels for {len(vertices)} vertices")
+        # The label lives on vertices; a sampled surface point takes the label of the
+        # vertex nearest it.
+        _, nearest = cKDTree(vertices).query(points_np)
+        part = torch.from_numpy(labels[nearest]).cuda()[torch.where(support)]
+        share = float(part.float().mean())
+        print(f"[lygra] part covers {int(part.sum())}/{len(part)} support points "
+              f"({100 * share:.1f}%); mode={args.part_mode}")
+        if args.part_mode == "restrict" and int(part.sum()) < 8:
+            raise SystemExit(f"only {int(part.sum())} support points on the part -- too few "
+                             f"to search contacts in; widen the region or raise "
+                             f"--n-sample-point")
 
     return dict(
         robot=robot, tree=tree, mesh_for_ik=mesh_for_ik, decomposed=decomposed,
@@ -200,6 +375,7 @@ def build_context(args, robot_name):
         dependency_matrix=dependency_matrix, accel_structure=accel_structure,
         points_all=points_all, zo_lr=zo_lr,
         points=points_all[torch.where(support)], normals=normals_all[torch.where(support)],
+        part=part,
         pool=IKGPUBufferPool(
             n_dof=tree.n_dof(), n_link=tree.n_link(), n_actuated_dof=tree.n_actuated_dof(),
             max_batch=min(args.batch_size_outer * args.batch_size_inner, 65536), retry=10,
@@ -227,12 +403,38 @@ def sample_once(args, context):
     contact_field = context["contact_field"]
     points, normals = context["points"], context["normals"]
 
+    part = context.get("part")
+    if part is not None and part.any() and not part.all():
+        # These points are the object as Lightning Grasp sees it for the purpose of
+        # *touching* it: object placement, the contact-field traversal and the contact
+        # search all run over this set. Cutting it down to the part is therefore what
+        # makes the region a contact constraint rather than a preference. The whole
+        # cloud stays in context["points_all"], which is what the collision check reads,
+        # so the rest of the object is still solid and still rejects grasps that hit it.
+        if args.part_mode == "restrict":
+            index = torch.where(part)[0]
+        else:
+            on, off = torch.where(part)[0], torch.where(~part)[0]
+            wanted = int(round(args.part_share * len(off) / max(1 - args.part_share, 1e-6)))
+            repeats = on[torch.randint(len(on), (wanted,), device=on.device)]
+            index = torch.cat([off, repeats])
+        points, normals = points[index], normals[index]
+
     with torch.no_grad():
-        object_poses, condition = sample_object_pose(
-            n=args.batch_size_outer, points=points, normals=normals,
-            contact_field=contact_field, tree=tree, mesh_data=context["decomposed_static"],
-            sampling_args=get_object_pose_sampling_args("canonical", context["robot"]),
-        )
+        prior = context.get("demo_prior")
+        if prior is not None:
+            object_poses, condition = demonstration_object_poses(
+                args.batch_size_outer, points, normals, prior, tree,
+                context["decomposed_static"]
+            )
+        else:
+            object_poses, condition = sample_object_pose(
+                n=args.batch_size_outer, points=points, normals=normals,
+                contact_field=contact_field, tree=tree, mesh_data=context["decomposed_static"],
+                sampling_args=get_object_pose_sampling_args("canonical", context["robot"]),
+            )
+        if len(object_poses) == 0:
+            return np.zeros((0, tree.n_actuated_dof())), np.zeros((0, 4, 4))
         interaction_idx = batch_object_all_contact_fields_interaction(
             object_pos=points, object_normal=normals,
             object_pose=object_poses, accel_structure=context["accel_structure"],
@@ -262,6 +464,12 @@ def sample_once(args, context):
         contact_pos_local, contact_normal_local = contact_field.sample_contact_geometry(
             contact_ids, local_ids
         )
+        # A restricted contact region can leave a pass with nothing to solve: no
+        # placement put the part within reach of a contact field. The IK cannot
+        # reshape an empty batch, so the pass simply returns nothing.
+        if len(target_pos) == 0 or len(contact_ids) == 0:
+            return np.zeros((0, tree.n_actuated_dof())), np.zeros((0, 4, 4))
+
         result = batch_ik(
             tree=tree, contact_ids=contact_ids, contact_parent_ids=context["contact_parent_ids"],
             contact_pos_in_linkf=contact_pos_local.float(),
@@ -310,6 +518,8 @@ def synthesize_pool(args, robot_name):
     import torch
 
     context = build_context(args, robot_name)
+    if getattr(args, "demo_prior", None):
+        seed_placement(context, **args.demo_prior)
     joints, poses, total = [], [], 0
     for index in range(args.max_passes):
         try:
@@ -369,7 +579,10 @@ def main():
     hand = np.load(args.hand_traj)
     demonstrated = Rotation.from_quat(hand["wrist_quat"][:, [1, 2, 3, 0]])  # stored wxyz
 
-    keyframes, windows = grasp_keyframes(args, rotation, translation, valid)
+    if args.keyframes_json:
+        keyframes, windows = v2s2r_keyframes(args, valid)
+    else:
+        keyframes, windows = grasp_keyframes(args, rotation, translation, valid)
     if not keyframes:
         raise SystemExit("no grasp windows found; nothing to synthesize against")
     print(f"[keyframes] {len(keyframes)} keyframes: "
@@ -391,6 +604,24 @@ def main():
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+
+    # Seeding is per keyframe, so the pool is built around the first one -- the
+    # contact frame when Video2Sim2Real keyframes are used, which is the grasp the
+    # refinement anchors on.
+    demo_prior = None
+    if args.seed_from_demo:
+        frame = keyframes[0][0]
+        demo_prior = dict(
+            palm_rotation=Rotation.from_quat(hand["wrist_quat"][frame][[1, 2, 3, 0]]).as_matrix(),
+            palm_position=hand["wrist_pos"][frame],
+            object_rotation=rotation[frame],
+            object_translation=translation[frame],
+            cone=args.seed_cone,
+            radius=args.seed_radius,
+        )
+        print(f"[lygra] seeding placements from the demonstration at frame {frame} "
+              f"({keyframes[0][1]})")
+    args.demo_prior = demo_prior
 
     shared = None if args.per_keyframe else synthesize_pool(args, robot_name)
     if shared is not None:

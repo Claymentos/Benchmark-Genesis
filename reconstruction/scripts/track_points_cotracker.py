@@ -276,7 +276,7 @@ def draw_overlay(args, frames, names, tracks, visible, points_3d, calibration):
     finite = np.isfinite(depths)
     near, far = np.percentile(depths[finite], [2, 98]) if finite.any() else (0.0, 1.0)
     # Top-down inset: x across, z into the scene, over the whole clip's extent.
-    x_all, z_all = points_3d[..., 0][finite], depths[finite]
+    x_all = points_3d[..., 0][finite]
     x_lo, x_hi = np.percentile(x_all, [1, 99]) if finite.any() else (-1, 1)
     z_lo, z_hi = near, far
     inset_w, inset_h = int(width * 0.26), int(height * 0.34)

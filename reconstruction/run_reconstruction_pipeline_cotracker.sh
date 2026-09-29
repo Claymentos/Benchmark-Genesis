@@ -1,57 +1,49 @@
 #!/usr/bin/env bash
 # Human demo video -> Wuji Hand + object trajectory replayed in Genesis.
 #
-# FoundationPose variant. Two differences from run_reconstruction_pipeline.sh, which
-# stays as the CoTracker/Kabsch (Video2Sim2Real) version:
+# CoTracker variant: the object trajectory comes from CoTracker surface points lifted
+# with depth and solved frame-to-reference with Kabsch (pose_from_points.py), then
+# Kalman-smoothed. Depth comes from the ZED recording's stereo when there is an SVO
+# next to the video, else from MoGe (set DEPTH_SOURCE=moge to force it).
 #
-#   * Depth comes from the ZED recording's own stereo measurement rather than MoGe's
-#     monocular estimate. On this data MoGe is 5x noisier frame to frame (5.0 mm vs
-#     1.0 mm of depth jitter) and reads 2-4 cm too far, worst while the object is
-#     lifted -- which is most of the object-pose noise.
-#   * Object pose comes from FoundationPose, which renders the mesh against RGB-D
-#     instead of fitting sparse point correspondences. A textureless, near-cylindrical
-#     object barely constrains those correspondences, so its own geometry does the
-#     disambiguating instead.
-#
-# Set DEPTH_SOURCE=moge to fall back to monocular depth when there is no SVO.
-#
-#   0  extract frames                                              [sam3]
-#   1  SAM3 segmentation: object (click) + hand (text)             [sam3]
-#   2  camera intrinsics from the recording's calibration          [-]
-#   3  metric depth, every frame                                   [system python / moge]
-#   4  supporting-plane fit (real up direction)                    [genesis]
-#   5  object mesh from RGB + depth + mask                         [recgen]
-#   6  HaWoR hand reconstruction                                   [hawor]
-#   7  retarget hand onto the Wuji Hand                            [wuji_retargeting]
-#   8  object pose tracking with FoundationPose, with a spin check  [foundationpose]
-#      about a symmetry axis found in the mesh (skipped when there is none)
-#   9  re-anchor object depth to the hand (monocular depth only), then take
-#      the object's spin from the wrist while it is held             [genesis]
-#  10  overlay the tracked pose on the source video                [genesis]
-#  11  replay the free-floating hand in Genesis                    [genesis]
-#  12  Franka Panda arm trajectory by IK, replayed in Genesis      [genesis]
-#  13  CoTracker surface points lifted with depth, drawn on the video [sam3],
-#      then a rigid trajectory fitted to them, Kalman-smoothed, and replayed
-#      in Genesis                                                      [genesis]
-#  14  refine the grasp until it holds, and replay that              [genesis]
+#   0  extract frames                                                  [sam3]
+#   1  SAM3 segmentation: object (+ parts) and hand                    [sam3]
+#   2  camera intrinsics from the recording's calibration              [moge]
+#   3  metric depth, every frame                        [zed python / moge]
+#   4  supporting-plane fit (real up direction)                        [genesis]
+#   5  object mesh from RGB + depth + mask (RecGen)                    [recgen]
+#   5b carry a part's mask onto the mesh as a per-vertex label          [genesis]
+#   6  HaWoR hand reconstruction                                       [hawor]
+#   7  retarget the hand onto the Wuji Hand                  [wuji_retargeting]
 #   7b trajectory optimization over the retargeted hand (velocity /     [genesis]
 #      acceleration / jerk costs, DemoMimic Appendix A.1)
-#  13b Lightning Grasp grasp synthesis at each grasp window's onset,    [lygra]
-#      middle and release, ranked against the demonstrated hand
+#   8  overlay a tracked pose on the video (reads <object>_traj_fp.npz, [genesis]
+#      which only the legacy FoundationPose pipeline writes)
+#   9  CoTracker surface points lifted with depth, drawn on the video   [sam3]
+#   9b rigid trajectory fitted to the lifted points, Kalman-smoothed    [genesis]
+#  10  Lightning Grasp synthesis at each grasp window's onset, middle   [lygra]
+#      and release, ranked against the demonstrated hand
+#  11  refine the grasp until it holds                                  [superdex]
+#  12  replay hand + object in Genesis                                  [genesis]
+#  13  SAM 3D point maps, compared against ZED depth                    [sam3d]
 #
-# Every output here is tagged with the tracker (_fp) so this variant never overwrites
-# the CoTracker/Kabsch results: <object>_traj_fp{_raw}.npz and overlay_fp.mp4. With
-# DEPTH_SOURCE=moge every depth-dependent output also gets a _moge suffix (ground
-# plane, trajectories, overlay, replays), so a MoGe run sits beside the ZED one.
+# With DEPTH_SOURCE=moge every depth-dependent output gets a _moge suffix (ground
+# plane, trajectories, replays), so a MoGe run sits beside the ZED one.
 #
-# Usage:  ./run_reconstruction_pipeline_foundationpose.sh VIDEO_PATH [FRAME_N] [OBJECT] [ANCHOR_HAND]
-# Example: ./run_reconstruction_pipeline_foundationpose.sh human_videos/pouring_a_cup/take001_pouring_a_cup_rgb.mp4 49 cup left
+# Usage:  ./run_reconstruction_pipeline_cotracker.sh VIDEO_PATH [FRAME_N] [OBJECT] [ANCHOR_HAND]
+# Example: ./run_reconstruction_pipeline_cotracker.sh human_videos/pouring_a_cup/take001_pouring_a_cup_rgb.mp4 49 cup left
+#
+# OBJECT may list several objects separated by commas; PART_NAMES="handle" segments
+# parts of the first one. Set OBJECT_PROMPT=click to segment the object by clicking
+# (needs a display) instead of by name, and CAM_PARAM_JSON (+ CAMERA_ID) when the
+# calibration ships apart from the footage.
 #
 # Stages are individually skippable so a run can resume rather than repeat the slow
-# parts (MoGe over every frame and FoundationPose are the expensive ones):
-# Set OBJECT_PROMPT=text to segment the object by name instead of by clicking, and
-# CAM_PARAM_JSON (+ CAMERA_ID) when calibration ships apart from the footage.
-#   SKIP_EXTRACT_AND_SAM3=1  SKIP_DEPTH=1  SKIP_MESH=1  SKIP_HAWOR=1  SKIP_RETARGETING=1  SKIP_TRACK=1  SKIP_HAND_LOCK=1  SKIP_OVERLAY=1  SKIP_WUJI=1  SKIP_FRANKA=1  SKIP_COTRACKER=1  SKIP_POINT_MAP=1  SKIP_REFINE=1  SKIP_TRAJOPT=1  SKIP_KEYFRAME_GRASPS=1
+# parts (MoGe over every frame, HaWoR, CoTracker, Lightning Grasp):
+#   SKIP_EXTRACT_AND_SAM3=1  SKIP_DEPTH=1  SKIP_MESH=1  SKIP_HAWOR=1  SKIP_RETARGETING=1
+#   SKIP_TRAJOPT=1  SKIP_OVERLAY=1  SKIP_COTRACKER=1  SKIP_KEYFRAME_GRASPS=1
+#   SKIP_REFINE=1  SKIP_WUJI=1  SKIP_POINT_MAP=1
+# and SKIP_COMPARE_LIFTS=0 turns on the ZED-vs-MoGe comparison of the point lifts.
 
 set -eo pipefail
 
@@ -59,10 +51,17 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/config/paths.sh"
 
 # ──────────────────────────── Per-run inputs (args) ────────────────────────────
-VIDEO_PATH="${1:?usage: run_reconstruction_pipeline.sh VIDEO_PATH [FRAME_N] [OBJECT] [ANCHOR_HAND]}"
+VIDEO_PATH="${1:?usage: run_reconstruction_pipeline_cotracker.sh VIDEO_PATH [FRAME_N] [OBJECT] [ANCHOR_HAND]}"
 VIDEO_PATH="$(realpath "$VIDEO_PATH")"
 n="${2:-49}"
-OBJECT_NAMES=("${3:-screwdriver}")
+# Bash does not split on commas, so "cup, handle" would be a single object called
+# "cup,_handle". Objects are separated here explicitly; a name may still contain spaces.
+IFS=',' read -ra OBJECT_NAMES <<< "${3:-cup}"
+OBJECT_NAMES=("${OBJECT_NAMES[@]# }")
+# Parts of the first object: segmented like objects, but they are not separate bodies.
+# They become a label on its mesh (label_mesh_part.py) that grasp synthesis can aim at.
+IFS=',' read -ra PART_NAMES <<< "${PART_NAMES:-}"
+PART_NAMES=("${PART_NAMES[@]# }")
 ANCHOR_HAND="${4:-left}"
 
 VIDEO_DIR="$(dirname "$VIDEO_PATH")"
@@ -94,7 +93,6 @@ META_PATH="${META_PATH:-${VIDEO_PATH%_rgb.*}_meta.json}"
 HAND_ID="${ANCHOR_HAND}_hand_0"
 HAND_MESHES_PATH="$VIDEO_DIR/$VIDEO_NAME/all_hand_meshes.npz"
 WUJI_TRAJ="$VIDEO_DIR/wuji_traj.npz"
-REPLAY_PATH="$VIDEO_DIR/wuji_replay$DEPTH_TAG.mp4"
 OVERLAY_PATH="$VIDEO_DIR/overlay_fp$DEPTH_TAG.mp4"
 POINTS_TRACK="$VIDEO_DIR/points_cotracker$DEPTH_TAG.npz"
 POINTS_OVERLAY="$VIDEO_DIR/overlay_points$DEPTH_TAG.mp4"
@@ -103,33 +101,32 @@ POINTS_REPLAY="$VIDEO_DIR/wuji_replay_points$DEPTH_TAG.mp4"
 WUJI_TRAJ_OPT="$VIDEO_DIR/wuji_traj_optimized.npz"
 KEYFRAME_GRASPS="$VIDEO_DIR/keyframe_grasps$DEPTH_TAG.npz"
 REFINED_TRAJ="$VIDEO_DIR/wuji_traj_refined$DEPTH_TAG.npz"
-FRANKA_TRAJ="$VIDEO_DIR/franka_traj$DEPTH_TAG.npz"
-FRANKA_REPLAY_PATH="$VIDEO_DIR/franka_replay$DEPTH_TAG.mp4"
-FRANKA_WUJI_URDF="${PANDA_WUJI_URDF:-$PANDA_WUJI_URDF_DIR/panda_wuji_${ANCHOR_HAND}.urdf}"
 
 SKIP_EXTRACT_AND_SAM3="${SKIP_EXTRACT_AND_SAM3:-0}"
 SKIP_DEPTH="${SKIP_DEPTH:-0}"
 SKIP_MESH="${SKIP_MESH:-0}"
 SKIP_HAWOR="${SKIP_HAWOR:-0}"
-SKIP_TRACK="${SKIP_TRACK:-0}"
 SKIP_OVERLAY="${SKIP_OVERLAY:-0}"
-SKIP_FRANKA="${SKIP_FRANKA:-0}"
 SKIP_RETARGETING="${SKIP_RETARGETING:-0}"
-SKIP_HAND_LOCK="${SKIP_HAND_LOCK:-0}"
 SKIP_WUJI="${SKIP_WUJI:-0}"
 SKIP_COTRACKER="${SKIP_COTRACKER:-0}"
 SKIP_POINT_MAP="${SKIP_POINT_MAP:-0}"
 SKIP_REFINE="${SKIP_REFINE:-0}"
 SKIP_TRAJOPT="${SKIP_TRAJOPT:-0}"
 SKIP_KEYFRAME_GRASPS="${SKIP_KEYFRAME_GRASPS:-0}"
+SKIP_COMPARE_LIFTS="${SKIP_COMPARE_LIFTS:-1}"
 # click needs a display; text runs headless.
-OBJECT_PROMPT="${OBJECT_PROMPT:-click}"
-# Anchoring rebuilds the object's position relative to the hand. It was built to
-# repair monocular depth drift and measurably helps there, but with ZED stereo depth
-# the tracker's own position is already metric and anchoring adds the hand's error
-# instead: on grasping_cup it took reprojection error from 15 px to 39 px. So it
-# follows the depth source unless forced with yes/no.
-ANCHOR_TO_HAND="${ANCHOR_TO_HAND:-auto}"
+OBJECT_PROMPT="${OBJECT_PROMPT:-text}"
+# Aim grasp synthesis at a labelled part, e.g. GRASP_PART=handle.
+GRASP_PART="${GRASP_PART:-}"
+GRASP_PART_SHARE="${GRASP_PART_SHARE:-0.5}"
+# Lightning Grasp's GPU batch, as outer x inner IK poses in flight. The default fills
+# a 16 GB card on some meshes; the pass then raises out-of-memory, the stage keeps the
+# grasps found so far (none, on the first pass) and the run stops there. Halving both
+# quarters the peak, and more passes make the candidate target reachable anyway.
+LYGRA_BATCH_OUTER="${LYGRA_BATCH_OUTER:-128}"
+LYGRA_BATCH_INNER="${LYGRA_BATCH_INNER:-256}"
+LYGRA_MAX_PASSES="${LYGRA_MAX_PASSES:-12}"
 # Object-trajectory smoothing: kalman (constant velocity + RTS) or window.
 SMOOTHER="${SMOOTHER:-kalman}"
 KALMAN_POS_NOISE="${KALMAN_POS_NOISE:-0.010}"
@@ -177,6 +174,20 @@ if [ "$SKIP_EXTRACT_AND_SAM3" != "1" ]; then
         fi
     done
 
+    for PART_NAME in "${PART_NAMES[@]}"; do
+        [ -z "$PART_NAME" ] && continue
+        PART_ID="${OBJECT_NAMES[0]// /_}_${PART_NAME// /_}"
+        echo "=== Running SAM3 video segmentation (part: $PART_NAME) ==="
+        # A part is prompted with the object included ("cup handle", not "handle"), which
+        # is what SAM3 grounds, and keeps the mask named per object so two objects can
+        # each have a handle without colliding.
+        python run_sam3_video.py \
+            --video "$VIDEO_PATH" \
+            --text "${OBJECT_NAMES[0]} $PART_NAME" \
+            --obj_id "$PART_ID" \
+            --frame_idx "$n"
+    done
+
     echo "=== Running SAM3 video segmentation (hand, text-based) ==="
     # SAM3 grounds simple noun phrases and does not reason about laterality: "left
     # hand" scores below its 0.5 detection threshold and yields an empty mask, so
@@ -221,17 +232,22 @@ FOCAL="${FOCAL:-$(sed -n 's/^FOCAL=//p' <<< "$INTRINSICS_INFO")}"
 : "${FOV_X:?could not determine horizontal FOV}"
 : "${FOCAL:?could not determine focal length}"
 
-# ──────────────── Step 3: MoGe metric depth, every frame ────────────────
+# ──────────────── Step 3: metric depth, every frame (ZED or MoGe) ────────────────
 if [ "$SKIP_DEPTH" != "1" ]; then
 
-    echo "=== Extracting ZED stereo depth ==="
-    # pyzed lives in the system python, not a conda env, so this one stage runs
-    # outside the env chain.
-    conda deactivate
-    "$PYTHON_ZED" "$SCRIPTS_DIR/extract_zed_depth.py" \
-        --svo "$SVO_PATH" \
-        --out-dir "$DEPTH_DIR" \
-        --depth-mode "$ZED_DEPTH_MODE"
+    # Only the ZED path has an SVO to read. With DEPTH_SOURCE=moge there is none, so
+    # the MoGe pass below is the whole depth stage -- which is what the header promises
+    # for footage that ships without a recording.
+    if [ "$DEPTH_SOURCE" = "zed" ]; then
+        echo "=== Extracting ZED stereo depth ==="
+        # pyzed lives in the system python, not a conda env, so this one stage runs
+        # outside the env chain.
+        conda deactivate
+        "$PYTHON_ZED" "$SCRIPTS_DIR/extract_zed_depth.py" \
+            --svo "$SVO_PATH" \
+            --out-dir "$DEPTH_DIR" \
+            --depth-mode "$ZED_DEPTH_MODE"
+    fi
 
     conda activate "$ENV_MOGE"
     echo "=== Running MoGe depth over all frames ==="
@@ -260,7 +276,7 @@ python fit_ground_plane.py \
     --exclude "${PLANE_EXCLUDE[@]}" \
     --out "$GROUND_PLANE"
 
-# ──────────────── Step 5: object mesh (RecGen on MoGe depth) ────────────────
+# ──────────────── Step 5: object mesh (RecGen) ────────────────
 if [ "$SKIP_MESH" != "1" ]; then
     conda activate "$ENV_RECGEN"
     cd "$RECGEN_DIR"
@@ -279,6 +295,26 @@ if [ "$SKIP_MESH" != "1" ]; then
 else
     echo "=== SKIP_MESH=1: reusing $VIDEO_DIR/recgen_out_$DEPTH_SOURCE ==="
 fi
+
+# ──────────── Step 5b: carry each part's mask onto the object's mesh ────────────
+# A part moves with the object, so it stays one mesh and one rigid body; what it gains
+# is a per-vertex label that grasp synthesis can aim placements at.
+conda activate "$ENV_GENESIS"
+cd "$SCRIPTS_DIR"
+for PART_NAME in "${PART_NAMES[@]}"; do
+    [ -z "$PART_NAME" ] && continue
+    PART_ID="${OBJECT_NAMES[0]// /_}_${PART_NAME// /_}"
+    OBJECT_ID="${OBJECT_NAMES[0]// /_}"
+    echo "=== Labelling the mesh with part: $PART_NAME ==="
+    python label_mesh_part.py \
+        --mesh "$VIDEO_DIR/recgen_out_$DEPTH_SOURCE/$OBJECT_ID/posed_mesh.obj" \
+        --mask "$MASKS_DIR/${PART_ID}.png" \
+        --intrinsics "$INTRINSICS_YAML" \
+        --frame "$n" \
+        --name "$PART_NAME" \
+        --out "$VIDEO_DIR/recgen_out_$DEPTH_SOURCE/$OBJECT_ID/part_${PART_NAME// /_}.npy" \
+        --preview "$VIDEO_DIR/recgen_out_$DEPTH_SOURCE/$OBJECT_ID/part_${PART_NAME// /_}.png"
+done
 
 # ──────────────── Step 6: HaWoR hand reconstruction ────────────────
 if [ "$SKIP_HAWOR" != "1" ]; then
@@ -340,7 +376,7 @@ FIRST_TRAJ="$VIDEO_DIR/${FIRST_OBJECT}_traj_fp${DEPTH_TAG}.npz"
 conda activate "$ENV_GENESIS"
 cd "$SCRIPTS_DIR"
 
-# ──────────────── Step 10: overlay the tracked pose on the video ────────────────
+# ──────────────── Step 8: overlay the tracked pose on the video ────────────────
 # The only check against ground truth: the posed mesh drawn over the frames it came
 # from, with the SAM3 mask outline. When anchoring ran, the raw track is drawn too so
 # its effect is visible.
@@ -365,9 +401,7 @@ else
     echo "=== SKIP_OVERLAY=1: skipping the overlay ==="
 fi
 
-
-
-# ──────────────── CoTracker points, lifted with depth ────────────────
+# ──────────────── Step 9: CoTracker points, lifted with depth ────────────────
 # An independent read on the object's motion: tracked surface points lifted straight
 # to 3D, with no mesh and no pose model, drawn on the video they came from.
 if [ "$SKIP_COTRACKER" != "1" ]; then
@@ -385,25 +419,25 @@ if [ "$SKIP_COTRACKER" != "1" ]; then
         --overlay "$POINTS_OVERLAY"
 
     # With both depth sources on disk, the same tracks lifted twice isolate the depth:
-    # the tracking is identical, so every difference in 3D comes from it.
+    # the tracking is identical, so every difference in 3D comes from it. Off by
+    # default; set SKIP_COMPARE_LIFTS=0 to run it.
     OTHER_DEPTH="$VIDEO_DIR/depth_moge"
     [ "$DEPTH_SOURCE" = "moge" ] && OTHER_DEPTH="$VIDEO_DIR/depth_zed"
-    # if [ -d "$OTHER_DEPTH" ]; then
-    #     echo "=== Comparing depth sources behind the point tracks ==="
-    #     conda activate "$ENV_GENESIS"
-    #     python compare_point_lifts.py \
-    #         --points "$POINTS_TRACK" \
-    #         --frames-dir "$FRAMES_DIR" \
-    #         --depth-dirs "$DEPTH_DIR" "$OTHER_DEPTH" \
-    #         --labels "$DEPTH_SOURCE" "$(basename "$OTHER_DEPTH" | sed 's/^depth_//')" \
-    #         --intrinsics "$INTRINSICS_YAML" \
-    #         --out "$VIDEO_DIR/compare_depth_lift.mp4" \
-    #         --plot "$VIDEO_DIR/compare_depth_lift.png"
-    # fi
+    if [ "$SKIP_COMPARE_LIFTS" != "1" ] && [ -d "$OTHER_DEPTH" ]; then
+        echo "=== Comparing depth sources behind the point tracks ==="
+        conda activate "$ENV_GENESIS"
+        python compare_point_lifts.py \
+            --points "$POINTS_TRACK" \
+            --frames-dir "$FRAMES_DIR" \
+            --depth-dirs "$DEPTH_DIR" "$OTHER_DEPTH" \
+            --labels "$DEPTH_SOURCE" "$(basename "$OTHER_DEPTH" | sed 's/^depth_//')" \
+            --intrinsics "$INTRINSICS_YAML" \
+            --out "$VIDEO_DIR/compare_depth_lift.mp4" \
+            --plot "$VIDEO_DIR/compare_depth_lift.png"
+    fi
 
-    # The lifted points also give a trajectory of their own: the rigid motion carrying
-    # the reference frame's cloud onto each later one. Model-free, so it is a check on
-    # the FoundationPose trajectory rather than a replacement.
+    # The lifted points give the object's trajectory: the rigid motion carrying the
+    # reference frame's cloud onto each later one, with no pose model.
     conda activate "$ENV_GENESIS"
     echo "=== Fitting an object trajectory to the lifted points ==="
     # No ground constraint here: it rests the object on the table whenever it moves
@@ -429,7 +463,7 @@ if [ "$SKIP_COTRACKER" != "1" ]; then
         --kalman-ang-accel "$KALMAN_ANG_ACCEL" \
         --out "$POINTS_TRAJ"
 
-    # ─────── Grasp synthesis at the video's grasp keyframes ───────
+    # ─────── Step 10: grasp synthesis at the video's grasp keyframes ───────
     # An independent read on the grasp, as the point tracks are on the pose: Lightning
     # Grasp is asked what the object's mesh affords at the onset, middle and release of
     # each grasp window, and the candidates are ranked against the hand the human
@@ -446,6 +480,11 @@ if [ "$SKIP_COTRACKER" != "1" ]; then
             --side "$ANCHOR_HAND" \
             --ground-plane "$GROUND_PLANE" \
             --lygra-dir "$LIGHTNING_GRASP_DIR" \
+            --batch-size-outer "$LYGRA_BATCH_OUTER" \
+            --batch-size-inner "$LYGRA_BATCH_INNER" \
+            --max-passes "$LYGRA_MAX_PASSES" \
+            ${GRASP_PART:+--part "$VIDEO_DIR/recgen_out_$DEPTH_SOURCE/$FIRST_OBJECT/part_${GRASP_PART// /_}.npy"} \
+            ${GRASP_PART:+--part-share "$GRASP_PART_SHARE"} \
             --out "$KEYFRAME_GRASPS"
         conda activate "$ENV_GENESIS"
         cd "$SCRIPTS_DIR"
@@ -523,18 +562,13 @@ else
     echo "=== SKIP_POINT_MAP=1: skipping the point map stage ==="
 fi
 
-
-
 echo
 echo "=== Done ==="
 echo "  overlay:       $OVERLAY_PATH"
-echo "  replay:        $REPLAY_PATH"
 echo "  hand traj:     $WUJI_TRAJ"
 echo "  optimized:     $WUJI_TRAJ_OPT"
 echo "  object traj:   $FIRST_TRAJ"
 echo "  object mesh:   $FIRST_MESH"
-echo "  arm traj:      $FRANKA_TRAJ"
-echo "  arm replay:    $FRANKA_REPLAY_PATH"
 if [ "$SKIP_COTRACKER" != "1" ]; then
     echo "  point tracks:  $POINTS_TRACK"
     echo "  point overlay: $POINTS_OVERLAY"

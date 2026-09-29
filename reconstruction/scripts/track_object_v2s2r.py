@@ -200,7 +200,6 @@ def gate_poses(rotations, translations, valid, max_step, max_turn):
 
 def clean_poses(rotations, translations, valid, max_step, max_turn, smooth_window, confidence=None):
     """Drop physically impossible frames, then interpolate and smooth what remains."""
-    from scipy.signal import savgol_filter
     from scipy.spatial.transform import Rotation, Slerp
 
     valid = gate_poses(rotations, translations, valid, max_step, max_turn)
@@ -274,7 +273,6 @@ def apply_ground_constraint(
     reference pose touches the table exactly by construction.
     """
     from scipy.ndimage import median_filter, uniform_filter1d
-    from scipy.signal import savgol_filter
     from scipy.spatial.transform import Rotation
 
     rotations = rotations.copy()
@@ -492,6 +490,14 @@ def main():
         confidence=confidence,
         resting=resting,
         ref_frame=args.ref_frame,
+        # The 2D tracks the poses were solved from, in the frame-first convention
+        # track_points_cotracker.py writes and extract_keyframes.py reads. Keyframe
+        # identification is defined on the pixel centroid of these tracks, so emitting
+        # them lets the Video2Sim2Real keyframes come from the same tracker as the
+        # poses rather than from a second tracking pass that would disagree with it.
+        tracks=tracks.transpose(1, 0, 2),
+        visible=visible.T,
+        queries=queries[:, [2, 1]].astype(np.float32),
     )
     print(f"Wrote {args.out}: {solved}/{n_frames} frames solved, {valid.sum()} after cleanup")
     if valid.any():

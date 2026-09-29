@@ -19,7 +19,7 @@ from scipy.spatial.transform import Rotation
 
 DEFAULT_WUJI_DIR = os.environ.get(
     "WUJI_RETARGETING_DIR",
-    "/home/cl-ment-prigent/wuji-ego-mint/eval/simulate/wuji-retargeting",
+    os.path.expanduser("~/wuji-ego-mint/eval/simulate/wuji-retargeting"),
 )
 
 
@@ -128,6 +128,13 @@ def parse_args():
     parser.add_argument("--viewer", action="store_true", help="Open the interactive viewer")
     parser.add_argument("--cpu", action="store_true", help="Run Genesis on CPU")
     parser.add_argument("--res", type=int, nargs=2, default=(960, 720), help="Recording resolution")
+    parser.add_argument("--camera-dir", default="0.7,-0.7,0.45",
+                        help="Direction from the scene centre to the camera, 'x,y,z' in the "
+                             "z-up world. Vary the first two to orbit")
+    parser.add_argument("--camera-distance", type=float, default=None,
+                        help="Camera distance in metres. The default scales with the "
+                             "scene's extent, which frames a whole trajectory but leaves a "
+                             "single pose small; set it to look closely at a grasp")
     return parser.parse_args()
 
 
@@ -298,10 +305,14 @@ def main():
             _, translations_w, solved = object_poses
             framed = np.vstack([framed, translations_w[solved] + shift])
         centre = framed.mean(axis=0)
-        distance = 2.0 * max(np.ptp(framed, axis=0).max(), 0.2)
+        distance = args.camera_distance
+        if distance is None:
+            distance = 2.0 * max(np.ptp(framed, axis=0).max(), 0.2)
+        direction = np.array([float(v) for v in args.camera_dir.split(",")])
+        direction /= np.linalg.norm(direction)
         camera = scene.add_camera(
             res=tuple(args.res),
-            pos=tuple(centre + distance * np.array([0.7, -0.7, 0.45])),
+            pos=tuple(centre + distance * direction),
             lookat=tuple(centre),
             fov=45,
         )
@@ -426,7 +437,7 @@ def main():
             # coordinates is nowhere near the object; the AABB is what tells you whether
             # the object actually left the table.
             aabb = np.asarray(object_entity.get_AABB().cpu())
-            print(f"[physics] object at the end: resting on the table"
+            print("[physics] object at the end: resting on the table"
                   if aabb[0, 2] < 0.01 else
                   f"[physics] object at the end: {aabb[0, 2] * 100:.1f} cm above the table")
         contact_frames = np.asarray(contact_frames)

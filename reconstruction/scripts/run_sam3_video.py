@@ -85,6 +85,13 @@ def parse_args():
         help="Path to model checkpoint (default: auto-download from HF)",
     )
     parser.add_argument(
+        "--offload-video",
+        action="store_true",
+        help="Keep the decoded frames in CPU RAM. They "
+        "are ~12 MB each on the GPU at SAM3's 1008 px, so a few hundred frames "
+        "exhaust a 16 GB card before tracking starts.",
+    )
+    parser.add_argument(
         "--click",
         action="store_true",
         help="Interactive mode: open a window to click points on a frame. "
@@ -256,6 +263,11 @@ def main():
     # Build predictor
     print("Loading SAM3 model...")
     predictor = build_sam3_video_predictor()
+    if args.offload_video:
+        import functools
+
+        model = predictor.model
+        model.init_state = functools.partial(model.init_state, offload_video_to_cpu=True)
 
     # Start session
     print(f"Starting session on: {args.video}")
@@ -416,7 +428,7 @@ def main():
 
     print(f"Done! Output saved to: {args.output_dir}/")
     print(f"  masks/frame_XXXXXX_masks/{args.obj_id}.png")
-    print(f"  overlays/    - frame_000000.png, ...")
+    print("  overlays/    - frame_000000.png, ...")
     print(f"  tracked_{args.obj_id}_{prompt_name}.mp4")
 
 

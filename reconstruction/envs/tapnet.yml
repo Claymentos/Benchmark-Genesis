@@ -1,0 +1,93 @@
+# `tapnet` env: explicitly requested conda packages + pinned pip packages.
+# Create with:  conda env create -f envs/tapnet.yml
+# Installed from local checkouts, so not listed below. Afterwards, in this env:
+#   pip install -e ~/do-as-i-do/reconstruction/modules/tapnet
+name: tapnet
+channels:
+- defaults
+- conda-forge
+dependencies:
+- pip=26.2.1
+- python=3.10
+- ffmpeg
+- pip:
+  - --extra-index-url https://download.pytorch.org/whl/cu128
+  - absl-py==2.5.0
+  - asttokens==3.0.2
+  - attrs==26.1.0
+  - chex==0.1.90
+  - comm==0.2.3
+  - contourpy==1.3.2
+  - cycler==0.12.1
+  - decorator==5.3.1
+  - dm-haiku==0.0.17
+  - dm-tree==0.1.10
+  - einops==0.8.2
+  - einshape==1.0
+  - exceptiongroup==1.3.1
+  - executing==2.2.1
+  - filelock==3.32.3
+  - fonttools==4.63.0
+  - fsspec==2026.7.0
+  - ipympl==0.10.0
+  - ipython==8.39.0
+  - ipywidgets==8.1.9
+  - jax==0.6.2
+  - jaxlib==0.6.2
+  - jaxline==0.0.8
+  - jedi==0.20.0
+  - jinja2==3.1.6
+  - jmp==0.0.4
+  - jupyterlab-widgets==3.0.17
+  - kiwisolver==1.5.1
+  - markupsafe==3.0.3
+  - matplotlib==3.10.9
+  - matplotlib-inline==0.2.2
+  - mediapy==1.2.7
+  - ml-collections==1.1.0
+  - ml-dtypes==0.6.0
+  - mpmath==1.3.0
+  - networkx==3.4.2
+  - numpy==2.2.6
+  - nvidia-cublas-cu12==12.8.3.14
+  - nvidia-cuda-cupti-cu12==12.8.57
+  - nvidia-cuda-nvrtc-cu12==12.8.61
+  - nvidia-cuda-runtime-cu12==12.8.57
+  - nvidia-cudnn-cu12==9.7.1.26
+  - nvidia-cufft-cu12==11.3.3.41
+  - nvidia-cufile-cu12==1.13.0.11
+  - nvidia-curand-cu12==10.3.9.55
+  - nvidia-cusolver-cu12==11.7.2.55
+  - nvidia-cusparse-cu12==12.5.7.53
+  - nvidia-cusparselt-cu12==0.6.3
+  - nvidia-nccl-cu12==2.26.2
+  - nvidia-nvjitlink-cu12==12.8.61
+  - nvidia-nvtx-cu12==12.8.55
+  - opencv-python==5.0.0.93
+  - opt-einsum==3.4.0
+  - optax==0.2.8
+  - parso==0.8.7
+  - pexpect==4.9.0
+  - pillow==12.3.0
+  - prompt-toolkit==3.0.53
+  - ptyprocess==0.7.0
+  - pure-eval==0.2.3
+  - pygments==2.21.0
+  - pyparsing==3.3.2
+  - python-dateutil==2.9.0.post0
+  - pyyaml==6.0.3
+  - scipy==1.15.3
+  - six==1.17.0
+  - stack-data==0.6.3
+  - sympy==1.14.0
+  - tabulate==0.10.0
+  - toolz==1.1.0
+  - torch==2.7.0+cu128
+  - torchvision==0.22.0+cu128
+  - tqdm==4.70.0
+  - traitlets==5.16.1
+  - triton==3.3.0
+  - typing-extensions==4.16.0
+  - wcwidth==0.8.3
+  - widgetsnbextension==4.0.16
+  - wrapt==2.4.0

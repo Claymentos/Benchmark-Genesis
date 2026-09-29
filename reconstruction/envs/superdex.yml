@@ -1,0 +1,62 @@
+# `superdex` env: explicitly requested conda packages + pinned pip packages.
+# Create with:  conda env create -f envs/superdex.yml
+name: superdex
+channels:
+- defaults
+dependencies:
+- pip=26.2.1
+- python=3.12
+- pip:
+  - annotated-types==0.8.0
+  - certifi==2026.7.22
+  - charset-normalizer==3.5.1
+  - cloudpickle==3.1.2
+  - contourpy==1.4.0
+  - cycler==0.12.1
+  - docker==7.2.0
+  - farama-notifications==0.0.6
+  - fast-simplification==0.2.0
+  - fonttools==4.65.0
+  - gymnasium==1.3.0
+  - h5py==3.16.0
+  - idna==3.20
+  - imageio==2.37.4
+  - imageio-ffmpeg==0.6.0
+  - kiwisolver==1.5.1
+  - lazy-loader==0.5
+  - matplotlib==3.11.2
+  - mypy-extensions==1.1.0
+  - networkx==3.6.1
+  - numpy==2.5.3
+  - opencv-python==5.0.0.93
+  - pillow==12.3.0
+  - polyscope==2.5.0
+  - psutil==7.2.2
+  - pycollada==0.9.3
+  - pydantic==2.13.5
+  - pydantic-core==2.46.5
+  - pyparsing==3.3.3
+  - pyre-extensions==0.0.32
+  - python-dateutil==2.9.0.post0
+  - pyyaml==6.0.3
+  - requests==2.34.2
+  - scikit-image==0.26.0
+  - scipy==1.18.1
+  - six==1.17.0
+  - superdex==1.0.0
+  - superdex-lab==1.0.0
+  - superdex-mesh-cli==1.0.0
+  - superdex-physics==1.0.0
+  - superdex-physics-debugger==1.0.0
+  - superdex-physics-fp64==1.0.0
+  - superdex-robotics==1.0.0
+  - superdex-robotics-fp64==1.0.0
+  - superdex-studio==1.0.0
+  - tabulate==0.10.0
+  - tifffile==2026.9.20
+  - trimesh==5.1.0
+  - typing-extensions==4.16.0
+  - typing-inspect==0.9.0
+  - typing-inspection==0.4.4
+  - unrealcv==1.3.2
+  - urllib3==2.8.0

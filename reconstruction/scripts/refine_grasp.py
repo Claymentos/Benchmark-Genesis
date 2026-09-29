@@ -47,7 +47,7 @@ from replay_wuji_superdex import camera_to_world, dof_index_map, to_transform
 
 DEFAULT_WUJI_DIR = os.environ.get(
     "WUJI_RETARGETING_DIR",
-    "/home/cl-ment-prigent/wuji-ego-mint/eval/simulate/wuji-retargeting",
+    os.path.expanduser("~/wuji-ego-mint/eval/simulate/wuji-retargeting"),
 )
 # SuperDex keeps the URDF's fixed tip joints as real links, unlike Genesis, which
 # merged them into their parents and forced the offsets to be hardcoded. The tips are
@@ -621,7 +621,6 @@ def main():
         np.c_[source["wrist_quat"][:, 1:], source["wrist_quat"][:, 0]]
     ).as_matrix()
     wrist_position = source["wrist_pos"]
-    traj = (qpos, wrist_rotation, wrist_position)
 
     tracked = np.load(args.object_poses)
     object_rotation = tracked["rotation"]

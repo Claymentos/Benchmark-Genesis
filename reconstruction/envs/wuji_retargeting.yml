@@ -1,0 +1,81 @@
+# `wuji_retargeting` env: explicitly requested conda packages + pinned pip packages.
+# Create with:  conda env create -f envs/wuji_retargeting.yml
+name: wuji_retargeting
+channels:
+- defaults
+dependencies:
+- pip=25.3
+- python=3.12
+- pip:
+  - absl-py==2.4.0
+  - aioice==0.10.2
+  - aiortc==1.14.0
+  - av==16.1.0
+  - avp-stream==2.51
+  - beautifulsoup4==4.14.3
+  - blinker==1.9.0
+  - certifi==2026.2.25
+  - cffi==2.0.0
+  - charset-normalizer==3.4.7
+  - click==8.3.2
+  - cmeel==0.61.0
+  - cmeel-assimp==5.4.3.1
+  - cmeel-boost==1.83.0
+  - cmeel-console-bridge==1.0.2.3
+  - cmeel-octomap==1.10.0
+  - cmeel-qhull==8.0.2.1
+  - cmeel-tinyxml==2.6.2.3
+  - cmeel-urdfdom==3.1.1.1
+  - cmeel-zlib==1.3.2
+  - colorama==0.4.6
+  - contourpy==1.3.3
+  - cryptography==46.0.7
+  - cycler==0.12.1
+  - dnspython==2.8.0
+  - eigenpy==3.5.1
+  - etils==1.14.0
+  - filelock==3.25.2
+  - flask==3.1.3
+  - fonttools==4.62.1
+  - fsspec==2026.3.0
+  - gdown==6.0.0
+  - glfw==2.10.0
+  - google-crc32c==1.8.0
+  - grpcio==1.80.0
+  - grpcio-tools==1.80.0
+  - hpp-fcl==2.4.4
+  - idna==3.11
+  - ifaddr==0.2.0
+  - itsdangerous==2.2.0
+  - jinja2==3.1.6
+  - kiwisolver==1.5.0
+  - markupsafe==3.0.3
+  - matplotlib==3.10.8
+  - mujoco==3.7.0
+  - nlopt==2.10.0
+  - numpy==1.26.4
+  - opencv-python==4.13.0.92
+  - pillow==12.2.0
+  - pin==2.7.0
+  - protobuf==6.33.6
+  - pycparser==3.0
+  - pydub==0.25.1
+  - pyee==13.0.1
+  - pylibsrtp==1.0.0
+  - pyopengl==3.1.10
+  - pyopenssl==26.0.0
+  - pyparsing==3.3.2
+  - pysocks==1.7.1
+  - python-dateutil==2.9.0.post0
+  - pyyaml==6.0.3
+  - requests==2.33.1
+  - scipy==1.17.1
+  - six==1.17.0
+  - soupsieve==2.8.3
+  - tqdm==4.67.3
+  - typing-extensions==4.15.0
+  - urllib3==2.6.3
+  - websocket-client==1.9.0
+  - werkzeug==3.1.8
+  - wujihandpy==1.5.1
+  - zipp==3.23.1

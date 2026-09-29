@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Contact annotation</title>
+<style>
+  :root { --bg: #16181d; --panel: #1f2229; --line: #333845; --text: #e6e8ee; --muted: #9aa1b2;
+          --fingers: #3b82f6; --thumb: #22c55e; --palm: #f59e0b; --patch: #16a34a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+               font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+  header { display: flex; align-items: center; gap: 14px; padding: 8px 14px; background: var(--panel);
+           border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 15px; margin: 0; }
+  header .sub { color: var(--muted); }
+  header .grow { flex: 1; }
+  main { display: grid; grid-template-columns: 380px 1fr; min-height: 0; }
+  aside { overflow-y: auto; background: var(--panel); border-right: 1px solid var(--line); padding: 12px 14px; }
+  #views { position: relative; min-width: 0; min-height: 0; display: grid; }
+  #views.stage1 { grid-template-rows: 1fr; }
+  #views.stage2 { grid-template-rows: 2fr 3fr; }
+  .view { position: relative; min-height: 0; border-bottom: 1px solid var(--line); }
+  .view canvas { display: block; width: 100%; height: 100%; }
+  .view .label { position: absolute; left: 10px; top: 8px; background: rgba(0,0,0,.55); padding: 3px 8px;
+                 border-radius: 4px; font-size: 12px; pointer-events: none; }
+  .hidden { display: none !important; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 0 6px; }
+  video { width: 100%; border-radius: 6px; background: #000; display: block; }
+  button { background: #2a2e38; color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+           padding: 6px 9px; font: inherit; cursor: pointer; }
+  button:hover { border-color: #56607a; }
+  button.on { border-color: var(--text); background: #353b48; }
+  button.primary { background: #2f6fed; border-color: #2f6fed; font-weight: 600; }
+  button:disabled { opacity: .45; cursor: default; }
+  .tabs button { border-radius: 6px 6px 6px 6px; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+  .row label.grow { flex: 1; }
+  .row input[type=range] { width: 130px; }
+  .val { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  td, th { padding: 3px 4px; text-align: right; border-bottom: 1px solid var(--line); }
+  td:first-child, th:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 500; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .warn { color: #fbbf24; } .err { color: #f87171; } .ok { color: #4ade80; }
+  .note { color: var(--muted); font-size: 12px; line-height: 1.6; }
+  kbd { background: #2a2e38; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; font-size: 11px; }
+  #status { white-space: pre-wrap; max-width: 520px; }
+  #status code { display: block; margin-top: 4px; padding: 4px 6px; border-radius: 4px; background: rgba(127,127,127,.18); color: inherit; font-size: 11px; user-select: all; word-break: break-all; }
+  .regions { display: grid; grid-template-columns: 1fr; gap: 6px; }
+  .regions button { text-align: left; display: flex; justify-content: space-between; }
+  #loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+</head>
+<body>
+<header>
+  <h1>Contact annotation</h1>
+  <span class="sub" id="meta">loading…</span>
+  <span class="tabs row">
+    <button id="tab1" class="on">1 · Hand contact <kbd>F1</kbd></button>
+    <button id="tab2">2 · Transfer to object <kbd>F2</kbd></button>
+  </span>
+  <span class="grow"></span>
+  <span id="status" class="sub"></span>
+  <button class="primary" id="save">Save <kbd>Ctrl+S</kbd></button>
+</header>
+<main>
+  <aside>
+    <h2>Video</h2>
+    <video id="video" src="video.webm" muted playsinline controls></video>
+    <div class="row">
+      <label class="grow"><input type="checkbox" id="loop" checked> loop the grasp</label>
+      <select id="rate"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option></select>
+      <span class="val" id="frameno"></span>
+    </div>
+    <div class="row"><button id="gotoFrame">Go to annotated frame</button></div>
+
+    <div id="panel1">
+      <h2>Paint hand contact</h2>
+      <div class="note">Paint every hand vertex touching the object, <b>including the parts the object
+        hides</b>: use the video (several views of the same grasp) to infer them. The region of each
+        vertex (fingers / thumb / palm) comes from EPIC-Contact's segmentation; the back of the hand
+        and the wrist are grey and cannot be painted.</div>
+      <div class="row">
+        <button id="draw" class="on">DRAW <kbd>D</kbd></button>
+        <button id="erase">ERASE <kbd>E</kbd></button>
+        <button id="eraseAll">ERASE ALL</button>
+        <button id="reset1">RESET VIEW <kbd>R</kbd></button>
+      </div>
+      <div class="row"><label class="grow">Brush</label><input type="range" id="brush" min="2" max="20" value="6"><span class="val" id="brushv"></span></div>
+      <div class="row"><button id="undo">Undo <kbd>Ctrl+Z</kbd></button></div>
+      <table id="counts"></table>
+    </div>
+
+    <div id="panel2" class="hidden">
+      <h2>Transfer each region</h2>
+      <div class="note">Top: the region's patch (green) on a flat hand with the finger spread of
+        the video, and its <b>contact axis</b> — blue ball = start, red line = direction.<br>
+        Bottom: click on the object <b>where the axis starts</b>, then a second point <b>in the
+        direction it runs</b>. The patch is carried over with the same distances and angles
+        (mirrored, since hand and object face each other).</div>
+      <div class="regions" id="regionButtons"></div>
+      <div class="row">
+        <button id="redo">Redo this region</button>
+        <button id="reset2">RESET VIEWS <kbd>R</kbd></button>
+        <label><input type="checkbox" id="showOthers" checked> other regions</label>
+      </div>
+      <div id="clickHint" class="note"></div>
+    </div>
+
+    <h2>Keys</h2>
+    <div class="note">Left drag: paint / left click: place · Right drag: rotate · Middle drag: pan ·
+      Wheel: zoom · <kbd>[</kbd> <kbd>]</kbd> brush · <kbd>Space</kbd> play/pause video</div>
+  </aside>
+  <div id="views" class="stage1">
+    <div class="view" id="v1"><div class="label">canonical MANO template — paint here</div></div>
+    <div class="view hidden" id="v2"><div class="label" id="v2label">flat hand</div></div>
+    <div class="view hidden" id="v3"><div class="label" id="v3label">object</div></div>
+    <div id="loading">loading meshes…</div>
+  </div>
+</main>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const $ = (id) => document.getElementById(id);
+const data = await (await fetch('data.json')).json();
+$('loading').remove();
+const REGIONS = data.regions;
+const RCOL = ['#3b82f6', '#22c55e', '#f59e0b'].map((c) => new THREE.Color(c));
+const SKIN = new THREE.Color('#e3c4ab'), OFF = new THREE.Color('#6b6f7a'), PATCH = new THREE.Color('#16a34a');
+$('meta').textContent = `frame ${data.frame} · ${data.side} hand · ${data.object} · grasp ${data.window[0]}–${data.window[1]}`;
+
+// ───────────── video ─────────────
+const video = $('video');
+const t0 = data.window[0] / data.fps, t1 = (data.window[1] + 1) / data.fps;
+video.addEventListener('loadedmetadata', () => { video.currentTime = data.frame / data.fps; });
+video.addEventListener('timeupdate', () => {
+  if ($('loop').checked && (video.currentTime >= t1 || video.currentTime < t0 - 0.05)) video.currentTime = t0;
+  $('frameno').textContent = `#${Math.round(video.currentTime * data.fps)}`;
+});
+$('rate').addEventListener('change', () => { video.playbackRate = Number($('rate').value); });
+$('gotoFrame').addEventListener('click', () => { video.pause(); video.currentTime = data.frame / data.fps; });
+
+// ───────────── viewers ─────────────
+class Viewer {
+  constructor(el, { opencv = false } = {}) {
+    this.el = el;
+    this.canvas = document.createElement('canvas');
+    el.prepend(this.canvas);
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
+    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color('#22252c');
+    this.root = new THREE.Group();
+    if (opencv) this.root.scale.set(1, -1, -1);          // OpenCV camera frame -> three.js
+    this.scene.add(this.root);
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x404040, 1.5));
+    this.camera = new THREE.PerspectiveCamera(35, 1, 0.001, 50);
+    const light = new THREE.PointLight(0xffffff, 1.3, 0, 0);
+    this.camera.add(light);
+    this.scene.add(this.camera);
+    this.controls = new OrbitControls(this.camera, this.canvas);
+    this.controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
+    this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    this.raycaster = new THREE.Raycaster();
+    new ResizeObserver(() => this.resize()).observe(el);
+  }
+  resize() {
+    const w = this.el.clientWidth, h = this.el.clientHeight;
+    if (!w || !h) return;
+    this.renderer.setSize(w, h, false);
+    this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
+  }
+  // Look at the bounding sphere of `positions` (local coords): from the world point `from`, or
+  // along the local direction `along` (the camera sits on its positive side), or down -z.
+  frame(positions, from = null, along = null) {
+    const box = new THREE.Box3().setFromBufferAttribute(new THREE.BufferAttribute(positions, 3));
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    this.root.updateMatrixWorld();
+    const centre = this.root.localToWorld(sphere.center.clone());
+    let dir = new THREE.Vector3(0, 0, -1);
+    if (from) dir = centre.clone().sub(from).normalize();
+    if (along) dir = along.clone().transformDirection(this.root.matrixWorld).negate();
+    const dist = sphere.radius / Math.sin(THREE.MathUtils.degToRad(this.camera.fov / 2)) * 1.1;
+    this.camera.position.copy(centre).addScaledVector(dir, -dist);
+    this.camera.up.set(0, 1, 0);
+    this.controls.target.copy(centre);
+    this.controls.update();
+    this.home = { pos: this.camera.position.clone(), target: centre.clone() };
+  }
+  reset() {
+    if (!this.home) return;
+    this.camera.position.copy(this.home.pos); this.controls.target.copy(this.home.target);
+    this.camera.up.set(0, 1, 0); this.controls.update();
+  }
+  hit(ev, mesh) {
+    const rect = this.canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((ev.clientX - rect.left) / rect.width) * 2 - 1,
+                                  -((ev.clientY - rect.top) / rect.height) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const hits = this.raycaster.intersectObject(mesh, false);
+    if (!hits.length) return null;
+    return { p: this.root.worldToLocal(hits[0].point.clone()), n: hits[0].face.normal.clone() };
+  }
+  render() { if (this.el.offsetParent !== null) this.renderer.render(this.scene, this.camera); }
+}
+
+function handGeometry(vertices) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(vertices), 3));
+  g.setIndex(data.template.faces);
+  g.computeVertexNormals();
+  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(vertices.length), 3));
+  return g;
+}
+const lambert = () => new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+const region = Int8Array.from(data.template.region);
+const nHand = region.length;
+
+// Stage 1: the canonical template.
+const v1 = new Viewer($('v1'));
+const tmplGeom = handGeometry(data.template.vertices);
+const tmplMesh = new THREE.Mesh(tmplGeom, lambert());
+v1.root.add(tmplMesh);
+const tmplV = tmplGeom.attributes.position.array, tmplN = tmplGeom.attributes.normal.array;
+const cursor = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12),
+  new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25, depthWrite: false }));
+cursor.visible = false; v1.root.add(cursor);
+
+// Stage 2: the flat hand (top) and the object (bottom).
+const v2 = new Viewer($('v2'));
+const flatGeom = handGeometry(data.flat.vertices);
+v2.root.add(new THREE.Mesh(flatGeom, lambert()));
+const v3 = new Viewer($('v3'), { opencv: true });
+const objGeom = new THREE.BufferGeometry();
+objGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(data.object_mesh.vertices), 3));
+objGeom.setIndex(data.object_mesh.faces);
+objGeom.computeVertexNormals();
+const objMesh = new THREE.Mesh(objGeom, new THREE.MeshLambertMaterial({ color: 0xc9ccd3, side: THREE.DoubleSide }));
+v3.root.add(objMesh);
+
+// ───────────── state ─────────────
+let painted = new Uint8Array(nHand);
+let erase = false;
+const undo = [];
+const clicks = {};           // region -> {start, direction} (object frame)
+const results = {};          // region -> {key, points, axis}
+let current = null;          // region index in stage 2
+let pending = null;          // first click of the current region
+let stage = 1;
+
+function recolour(geom, highlightRegion = null) {
+  const col = geom.attributes.color.array, c = new THREE.Color();
+  for (let i = 0; i < nHand; i++) {
+    const r = region[i];
+    if (r < 0) c.copy(OFF);
+    else if (painted[i] && highlightRegion === null) c.copy(RCOL[r]);
+    else if (painted[i] && r === highlightRegion) c.copy(PATCH);
+    else if (painted[i] && $('showOthers').checked) c.copy(SKIN).lerp(RCOL[r], 0.45);
+    else c.copy(SKIN);
+    c.toArray(col, 3 * i);
+  }
+  geom.attributes.color.needsUpdate = true;
+}
+const paintedList = () => { const out = []; for (let i = 0; i < nHand; i++) if (painted[i]) out.push(i); return out; };
+const regionKey = (r) => { const out = []; for (let i = 0; i < nHand; i++) if (painted[i] && region[i] === r) out.push(i); return out.join(','); };
+const status = (html) => { $('status').innerHTML = html; };
+
+function counts() {
+  const n = [0, 0, 0];
+  for (let i = 0; i < nHand; i++) if (painted[i]) n[region[i]]++;
+  $('counts').innerHTML = '<tr><th>region</th><th>painted vertices</th></tr>' + REGIONS.map((r, i) =>
+    `<tr><td><span class="sw" style="background:#${RCOL[i].getHexString()}"></span>${r}</td><td>${n[i]}</td></tr>`).join('');
+  return n;
+}
+
+// ───────────── stage 1: painting ─────────────
+const brushMM = () => Number($('brush').value);
+function setErase(on) { erase = on; $('draw').classList.toggle('on', !on); $('erase').classList.toggle('on', on); }
+$('draw').onclick = () => setErase(false);
+$('erase').onclick = () => setErase(true);
+$('brush').oninput = () => { $('brushv').textContent = brushMM() + ' mm'; };
+$('brush').oninput();
+$('eraseAll').onclick = () => { snapshot(); painted.fill(0); recolour(tmplGeom); counts(); };
+$('reset1').onclick = () => v1.reset();
+$('undo').onclick = () => doUndo();
+
+function snapshot() { undo.push(painted.slice()); if (undo.length > 60) undo.shift(); }
+function doUndo() { const s = undo.pop(); if (s) { painted = s; recolour(tmplGeom); counts(); } }
+function paint(h, eraseNow) {
+  const r2 = (brushMM() / 1000) ** 2, { p, n } = h;
+  for (let i = 0; i < nHand; i++) {
+    if (region[i] < 0) continue;
+    const dx = tmplV[3 * i] - p.x, dy = tmplV[3 * i + 1] - p.y, dz = tmplV[3 * i + 2] - p.z;
+    if (dx * dx + dy * dy + dz * dz > r2) continue;
+    // Same-side test: a stroke on one finger does not bleed onto the next.
+    if (tmplN[3 * i] * n.x + tmplN[3 * i + 1] * n.y + tmplN[3 * i + 2] * n.z < 0.2) continue;
+    painted[i] = eraseNow ? 0 : 1;
+  }
+  recolour(tmplGeom);
+}
+let painting = false;
+v1.canvas.addEventListener('pointerdown', (ev) => {
+  if (ev.button !== 0) return;
+  painting = true; snapshot();
+  const h = v1.hit(ev, tmplMesh); if (h) paint(h, erase || ev.shiftKey);
+  v1.canvas.setPointerCapture(ev.pointerId);
+});
+v1.canvas.addEventListener('pointermove', (ev) => {
+  const h = v1.hit(ev, tmplMesh);
+  cursor.visible = !!h;
+  if (h) { cursor.position.copy(h.p); cursor.scale.setScalar(brushMM() / 1000); }
+  if (painting && h) paint(h, erase || ev.shiftKey);
+});
+v1.canvas.addEventListener('pointerup', () => { if (painting) counts(); painting = false; });
+v1.canvas.addEventListener('pointerleave', () => { cursor.visible = false; });
+
+// ───────────── stage 2: transfer ─────────────
+const tube = (points, radius, color) => {
+  const curve = new THREE.CatmullRomCurve3(points.map((p) => new THREE.Vector3(...p)));
+  return new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(8, points.length * 2), radius, 8, false),
+                        new THREE.MeshBasicMaterial({ color }));
+};
+const ball = (p, radius, color) => {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 10), new THREE.MeshBasicMaterial({ color }));
+  m.position.set(...p); return m;
+};
+const handAxis = new THREE.Group(); v2.root.add(handAxis);
+const objDecor = new THREE.Group(); v3.root.add(objDecor);
+
+async function post(path, body) {
+  const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  return res.json();
+}
+
+function regionButtons() {
+  const n = counts();
+  $('regionButtons').innerHTML = '';
+  REGIONS.forEach((r, i) => {
+    const b = document.createElement('button');
+    const done = results[i] && results[i].key === regionKey(i);
+    b.innerHTML = `<span><span class="sw" style="background:#${RCOL[i].getHexString()}"></span>${r}</span>` +
+      `<span class="${done ? 'ok' : n[i] ? 'warn' : ''}">${!n[i] ? 'not painted' : done ? 'transferred ✓' : 'to transfer'}</span>`;
+    b.disabled = !n[i];
+    b.classList.toggle('on', current === i);
+    b.onclick = () => selectRegion(i);
+    $('regionButtons').appendChild(b);
+  });
+}
+
+async function selectRegion(i) {
+  current = i; pending = null;
+  regionButtons();
+  recolour(flatGeom, i);
+  handAxis.clear();
+  $('v2label').textContent = `flat hand — ${REGIONS[i]} patch and its contact axis`;
+  const res = await post('axis', { region: REGIONS[i], hand_dense: paintedList() });
+  if (!res.ok) { status(`<span class="err">${res.error}</span>`); return; }
+  const r = 0.0012;
+  handAxis.add(tube(res.axis, r, 0xdc2626), ball(res.axis[0], 0.004, 0x2563eb));
+  hint();
+  // Clicks belong to the patch they were placed for: once the painting of this region
+  // changes, its axis changes too, so the clicks are dropped and must be placed again.
+  if (clicks[i] && clicks[i].key !== regionKey(i)) {
+    delete clicks[i]; delete results[i];
+    status(`<span class="warn">${REGIONS[i]}: painting changed since its clicks; click the axis again.</span>`);
+    regionButtons(); hint();
+  } else if (clicks[i] && !results[i]) await runTransfer(i);
+  drawObject();
+}
+
+function hint() {
+  if (current === null) { $('clickHint').textContent = 'Pick a region above.'; return; }
+  $('clickHint').innerHTML = pending
+    ? `<b>Click 2</b>: a point in the direction the red axis runs.`
+    : `<b>Click 1</b> on the object: where the blue ball (axis start) goes.`;
+}
+
+async function runTransfer(i) {
+  status('transferring…');
+  const res = await post('transfer', { region: REGIONS[i], hand_dense: paintedList(), ...clicks[i] });
+  if (!res.ok) { status(`<span class="err">${res.error}</span>`); return; }
+  results[i] = { key: regionKey(i), points: res.points, axis: res.axis };
+  status(`<span class="ok">${REGIONS[i]}: ${res.points.length} contact pairs</span>`);
+  regionButtons();
+}
+
+function drawObject() {
+  objDecor.clear();
+  REGIONS.forEach((r, i) => {
+    const res = results[i];
+    if (!res || (!$('showOthers').checked && i !== current)) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(res.points.flat()), 3));
+    objDecor.add(new THREE.Points(g, new THREE.PointsMaterial({ color: i === current ? PATCH : RCOL[i], size: 0.003 })));
+    if (i === current && res.axis.length > 1) objDecor.add(tube(res.axis, 0.0008, 0xdc2626), ball(res.axis[0], 0.003, 0x2563eb));
+  });
+  if (pending) objDecor.add(ball(pending, 0.003, 0x2563eb));
+}
+
+let down = null;
+v3.canvas.addEventListener('pointerdown', (ev) => { if (ev.button === 0) down = { x: ev.clientX, y: ev.clientY }; });
+v3.canvas.addEventListener('pointerup', async (ev) => {
+  if (ev.button !== 0 || !down || current === null) return;
+  const moved = Math.hypot(ev.clientX - down.x, ev.clientY - down.y); down = null;
+  if (moved > 4) return;
+  const h = v3.hit(ev, objMesh); if (!h) return;
+  const p = [h.p.x, h.p.y, h.p.z];
+  if (!pending) { pending = p; hint(); drawObject(); return; }
+  clicks[current] = { start: pending, direction: p, key: regionKey(current) };
+  pending = null; hint();
+  await runTransfer(current);
+  drawObject();
+});
+$('redo').onclick = () => { if (current === null) return; delete clicks[current]; delete results[current]; pending = null; hint(); regionButtons(); drawObject(); };
+$('reset2').onclick = () => { v2.reset(); v3.reset(); };
+$('showOthers').onchange = () => { if (current !== null) recolour(flatGeom, current); drawObject(); };
+
+// ───────────── stages, save, keys ─────────────
+function setStage(s) {
+  stage = s;
+  $('tab1').classList.toggle('on', s === 1); $('tab2').classList.toggle('on', s === 2);
+  $('panel1').classList.toggle('hidden', s !== 1); $('panel2').classList.toggle('hidden', s !== 2);
+  $('v1').classList.toggle('hidden', s !== 1);
+  $('v2').classList.toggle('hidden', s !== 2); $('v3').classList.toggle('hidden', s !== 2);
+  $('views').className = s === 1 ? 'stage1' : 'stage2';
+  if (s === 2) {
+    regionButtons();
+    const first = REGIONS.findIndex((r, i) => counts()[i] > 0);
+    if (current === null && first >= 0) selectRegion(first);
+    else if (current !== null) selectRegion(current);
+    else hint();
+  }
+}
+$('tab1').onclick = () => setStage(1);
+$('tab2').onclick = () => setStage(2);
+
+async function save() {
+  const n = counts();
+  if (!n.some((x) => x)) { status('<span class="err">Paint some hand contact first.</span>'); return; }
+  const missing = REGIONS.filter((r, i) => n[i] && !(results[i] && results[i].key === regionKey(i)));
+  status('saving…');
+  // Clicks are keyed by region index here, by region name on disk.
+  const named = Object.fromEntries(Object.entries(clicks).map(([i, c]) => [REGIONS[i], c]));
+  const res = await post('save', { hand_dense: paintedList(), clicks: named });
+  if (!res.ok) { status(`<span class="err">${res.error}</span>`); return; }
+  status(missing.length
+    ? `<span class="warn">Saved. Not transferred yet: ${missing.join(', ')} (EC-fit ignores them).</span>`
+    : `<span class="ok">Saved to ${res.out_dir}. Annotation done; next, in a terminal:</span>\n<code>${res.next}</code>`);
+}
+$('save').onclick = save;
+
+window.addEventListener('keydown', (ev) => {
+  if (ev.target.tagName === 'SELECT') return;
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') { ev.preventDefault(); if (stage === 1) doUndo(); return; }
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's') { ev.preventDefault(); save(); return; }
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if (ev.key === 'F1') { ev.preventDefault(); setStage(1); }
+  else if (ev.key === 'F2') { ev.preventDefault(); setStage(2); }
+  else if (ev.key === ' ') { ev.preventDefault(); video.paused ? video.play() : video.pause(); }
+  else if (ev.key === 'd') setErase(false);
+  else if (ev.key === 'e') setErase(true);
+  else if (ev.key === 'r') { v1.reset(); v2.reset(); v3.reset(); }
+  else if (ev.key === '[') { $('brush').value = Math.max(2, brushMM() - 1); $('brush').oninput(); }
+  else if (ev.key === ']') { $('brush').value = Math.min(20, brushMM() + 1); $('brush').oninput(); }
+});
+
+// ───────────── start ─────────────
+if (data.annotation) {
+  for (const i of data.annotation.hand_dense) painted[i] = 1;
+  const stale = [];
+  for (const [r, c] of Object.entries(data.annotation.clicks || {})) {
+    const i = REGIONS.indexOf(r);
+    // Clicks saved without their patch (older saves) cannot be checked, so they are redone.
+    if (typeof c.key === 'string') clicks[i] = c; else stale.push(r);
+  }
+  status(stale.length
+    ? `<span class="warn">Loaded the saved annotation. Click the axis again for: ${stale.join(', ')}.</span>`
+    : 'Loaded the saved annotation.');
+}
+recolour(tmplGeom); recolour(flatGeom); counts();
+// Hand views face the palm: the mean normal of EPIC's palm region.
+const palmNormal = (geom) => {
+  const n = geom.attributes.normal.array, out = new THREE.Vector3();
+  for (let i = 0; i < nHand; i++) if (region[i] === 2) out.add(new THREE.Vector3(n[3 * i], n[3 * i + 1], n[3 * i + 2]));
+  return out.normalize();
+};
+v1.frame(tmplGeom.attributes.position.array, null, palmNormal(tmplGeom));
+v2.frame(flatGeom.attributes.position.array, null, palmNormal(flatGeom));
+v3.frame(objGeom.attributes.position.array, new THREE.Vector3(0, 0, 0));   // from the real camera
+const loop = () => { v1.render(); v2.render(); v3.render(); requestAnimationFrame(loop); };
+loop();
+</script>
+</body>
+</html>

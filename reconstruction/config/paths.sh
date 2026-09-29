@@ -1,17 +1,13 @@
 # ───────────────────────── reconstruction pipeline paths ─────────────────────────
-# Sourced by run_pipeline.sh; the Python scripts read these via os.environ
+# Sourced by every run_*.sh pipeline; the Python scripts read these via os.environ.
+# Each ${VAR:-default} can be overridden from the environment.
 
-# Root of this extracted project 
+# Root of the reconstruction/ directory
 RECON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export RECON_ROOT
-
-
-
 export SCRIPTS_DIR="$RECON_ROOT/scripts"
 
-
-
-
+# ── Conda env per stage (see envs/) ──
 export ENV_SAM3=sam3
 export ENV_SAM3D=sam3d
 export ENV_HAWOR=hawor
