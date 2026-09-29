@@ -66,6 +66,25 @@
 # TRACKER=cotracker swaps stage 9's BootsTAPIR for CoTracker + pose_from_points, which
 # is the same Kabsch solve behind a different point tracker. BootsTAPIR is the paper's,
 # and is the default.
+#
+# Moving camera and mocap hands (TouchAnything, whose head camera moves and whose hands
+# are measured by Rokoko gloves + Vive trackers rather than estimated):
+#   MOVING_CAMERA=1       segment a static scene element (STATIC_PROMPT, default
+#                         "table") in stage 2, track it like an object in stage 6c to
+#                         get the camera's motion, and carry the object trajectory into
+#                         the reference camera in stage 9 (compose_camera_motion.py).
+#                         Every other stage already works in the reference camera frame.
+#   MOCAP_EPISODE=DIR     a TouchAnything episode; stage 7 writes all_hand_meshes.npz from
+#                         its rokoko_hands.json instead of running HaWoR, placed in the
+#                         reference camera by touchanything_hands.py. Needs MOVING_CAMERA=1.
+#   HELD_WINDOW=A-B       frames the object is held (inclusive). Monocular depth puts
+#                         a small held object off the hand; with MOCAP_EPISODE, slide it
+#                         along its camera ray to the fist's depth over the window
+#                         (snap_depth_to_hand.py). Rotation and image position are kept.
+#   SKIP_CAMERA=1         reuse stage 6c's camera_traj.npz.
+# Example:
+#   MOVING_CAMERA=1 MOCAP_EPISODE=touchanything/Workbench/pick_up_screwdriver/20260321_103227_213 \
+#     ./run_v2s2r_pipeline.sh human_videos/touchanything/pick_up_screwdriver_103227/pick_up_screwdriver_rgb.mp4 0 screwdriver left
 
 set -eo pipefail
 
@@ -132,11 +151,28 @@ SKIP_KEYFRAMES="${SKIP_KEYFRAMES:-0}"
 SKIP_KEYFRAME_GRASPS="${SKIP_KEYFRAME_GRASPS:-0}"
 SKIP_REFINE="${SKIP_REFINE:-0}"
 SKIP_REPLAY="${SKIP_REPLAY:-0}"
+SKIP_CAMERA="${SKIP_CAMERA:-0}"
+
+MOVING_CAMERA="${MOVING_CAMERA:-0}"
+STATIC_PROMPT="${STATIC_PROMPT:-table}"
+STATIC_ID="${STATIC_PROMPT// /_}"
+MOCAP_EPISODE="${MOCAP_EPISODE:-}"
+[ -n "$MOCAP_EPISODE" ] && MOCAP_EPISODE="$(realpath "$MOCAP_EPISODE")"
+CAMERA_TRAJ="$VIDEO_DIR/camera_traj$DEPTH_TAG.npz"
+HELD_WINDOW="${HELD_WINDOW:-}"
+if [ -n "$MOCAP_EPISODE" ] && [ "$MOVING_CAMERA" != "1" ]; then
+    echo "MOCAP_EPISODE needs MOVING_CAMERA=1: the mocap hands are placed through the camera track" >&2
+    exit 1
+fi
 
 OBJECT_PROMPT="${OBJECT_PROMPT:-text}"
 SEMANTIC_OVERRIDE="${SEMANTIC_OVERRIDE:-1}"
 SEMANTIC_MODEL="${SEMANTIC_MODEL:-gemini-flash-lite-latest}"
 TRACKER="${TRACKER:-tapir}"
+if [ "$MOVING_CAMERA" = "1" ] && [ "$TRACKER" = "cotracker" ]; then
+    echo "MOVING_CAMERA=1 composes the camera motion only into the BootsTAPIR track; use TRACKER=tapir" >&2
+    exit 1
+fi
 
 # Grasp synthesis, as the other pipelines expose it.
 GRASP_PART="${GRASP_PART:-}"
@@ -302,6 +338,15 @@ if [ "$SKIP_EXTRACT_AND_SAM3" != "1" ]; then
         --text "hand" \
         --obj_id "$HAND_ID" \
         --frame_idx "$n"
+
+    if [ "$MOVING_CAMERA" = "1" ]; then
+        echo "=== Running SAM3 video segmentation (static scene: $STATIC_PROMPT) ==="
+        python run_sam3_video.py ${SAM3_OFFLOAD:+--offload-video} \
+            --video "$VIDEO_PATH" \
+            --text "$STATIC_PROMPT" \
+            --obj_id "$STATIC_ID" \
+            --frame_idx "$n"
+    fi
 else
     echo "=== SKIP_EXTRACT_AND_SAM3=1: skipping frame extraction + SAM3 ==="
 fi
@@ -406,8 +451,42 @@ for PART_NAME in "${PART_NAMES[@]}"; do
         --preview "$VIDEO_DIR/recgen_out_$DEPTH_SOURCE/$FIRST_OBJECT/part_${PART_NAME// /_}.png"
 done
 
+# ──────────── Stage 6c: camera motion, from a static scene element ────────────
+# The static element is tracked exactly like the object; what it gives is T_ct<-cref,
+# the camera's motion relative to the reference frame.
+if [ "$MOVING_CAMERA" = "1" ] && [ "$SKIP_CAMERA" != "1" ]; then
+    conda activate "$ENV_TAPNET"
+    cd "$SCRIPTS_DIR"
+    echo "=== Tracking the camera from the static '$STATIC_PROMPT' ==="
+    python track_object_v2s2r.py \
+        --frames-dir "$FRAMES_DIR" \
+        --masks-root "$VIDEO_MASKS_DIR" \
+        --depth-dir "$DEPTH_DIR" \
+        --object "$STATIC_ID" \
+        --ref-frame "$n" \
+        --intrinsics "$INTRINSICS_YAML" \
+        --checkpoint "$TAPNET_CKPT" \
+        --smooth-window "${CAMERA_SMOOTH_WINDOW:-9}" \
+        --out "$CAMERA_TRAJ"
+fi
+
 # ──────────────── Stage 7: HaWoR hand reconstruction ────────────────
-if [ "$SKIP_HAWOR" != "1" ]; then
+if [ -n "$MOCAP_EPISODE" ] && [ "$SKIP_HAWOR" != "1" ]; then
+    conda activate "$ENV_GENESIS"
+    cd "$SCRIPTS_DIR"
+    echo "=== Mocap hands from $MOCAP_EPISODE (instead of HaWoR) ==="
+    mkdir -p "$(dirname "$HAND_MESHES_PATH")"
+    python touchanything_hands.py \
+        --episode-dir "$MOCAP_EPISODE" \
+        --camera-traj "$CAMERA_TRAJ" \
+        --intrinsics "$INTRINSICS_YAML" \
+        --depth-dir "$DEPTH_DIR" \
+        --frames-dir "$FRAMES_DIR" \
+        --overlay "$VIDEO_DIR/hands_overlay$DEPTH_TAG.mp4" \
+        --transform-out "$VIDEO_DIR/mocap_to_camera$DEPTH_TAG.json" \
+        ${MOCAP_FIXED_SCALE:+--fixed-scale "$MOCAP_FIXED_SCALE"} \
+        --out "$HAND_MESHES_PATH"
+elif [ "$SKIP_HAWOR" != "1" ]; then
     conda activate "$ENV_HAWOR"
     cd "$SCRIPTS_DIR"
     echo "=== Running HaWoR ==="
@@ -484,6 +563,8 @@ if [ "$SKIP_TRACK" != "1" ]; then
         echo "=== Tracking the object pose (BootsTAPIR + Kabsch, Video2Sim2Real) ==="
         conda activate "$ENV_TAPNET"
         cd "$SCRIPTS_DIR"
+        TRACK_OUT="$OBJ_TRAJ"
+        [ "$MOVING_CAMERA" = "1" ] && TRACK_OUT="${OBJ_TRAJ%.npz}_camera.npz"
         python track_object_v2s2r.py \
             --frames-dir "$FRAMES_DIR" \
             --masks-root "$VIDEO_MASKS_DIR" \
@@ -493,10 +574,36 @@ if [ "$SKIP_TRACK" != "1" ]; then
             --intrinsics "$INTRINSICS_YAML" \
             --checkpoint "$TAPNET_CKPT" \
             --smooth-window "$SMOOTH_WINDOW" \
-            --out "$OBJ_TRAJ"
+            --out "$TRACK_OUT"
+        if [ "$MOVING_CAMERA" = "1" ]; then
+            conda activate "$ENV_GENESIS"
+            echo "=== Carrying the object trajectory into the reference camera ==="
+            python compose_camera_motion.py \
+                --object-traj "$TRACK_OUT" \
+                --camera-traj "$CAMERA_TRAJ" \
+                --intrinsics "$INTRINSICS_YAML" \
+                --depth-dir "$DEPTH_DIR" \
+                --out "${OBJ_TRAJ%.npz}_composed.npz"
+            cp "${OBJ_TRAJ%.npz}_composed.npz" "$OBJ_TRAJ"
+        fi
     fi
 else
     echo "=== SKIP_TRACK=1: reusing $OBJ_TRAJ ==="
+fi
+# Outside the tracking block so it can be re-run on its own; it always starts from the
+# composed track, never from its own output.
+if [ -n "$HELD_WINDOW" ] && [ -n "$MOCAP_EPISODE" ]; then
+    conda activate "$ENV_GENESIS"
+    cd "$SCRIPTS_DIR"
+    echo "=== Held object's depth from the mocap hand, frames $HELD_WINDOW ==="
+    python snap_depth_to_hand.py \
+        --object-traj "${OBJ_TRAJ%.npz}_composed.npz" \
+        --camera-traj "$CAMERA_TRAJ" \
+        --hand-meshes "$HAND_MESHES_PATH" \
+        --side "$ANCHOR_HAND" \
+        --mesh "$FIRST_MESH" \
+        --window "$HELD_WINDOW" \
+        --out "$OBJ_TRAJ"
 fi
 [ "$TRACKER" = "cotracker" ] && KEYFRAME_POINTS="$POINTS_TRACK"
 

@@ -23,6 +23,8 @@ export ENV_SUPERDEX=superdex
 # Lightning Grasp's own env: its CUDA kernels ship as binaries built against a pinned
 # python/torch pair, so it cannot share one of the others.
 export ENV_LYGRA=lygra
+# smplx + CUDA torch; MANO fitting (mano_from_mocap.py) and EC-Fit.
+export ENV_ECFIT=ecfit
 # The ZED SDK's pyzed is installed against the conda base interpreter, not into any
 # of the per-stage envs, so this one stage steps outside the env chain.
 export PYTHON_ZED="${PYTHON_ZED:-$(conda info --base)/bin/python}"

@@ -66,6 +66,20 @@ def parse_args():
         help="Without hand meshes, contact falls back to this wrist-to-surface distance",
     )
     parser.add_argument("--min-grasp", type=int, default=10, help="Shortest grasp kept, frames")
+    parser.add_argument(
+        "--grasps",
+        default=None,
+        help="Grasp windows as 'START-END[,START-END]', inclusive frames, instead of finding "
+        "them from contact. For when the object's track is wrong while held -- e.g. its "
+        "monocular depth off once lifted -- so contact itself cannot find the grasp.",
+    )
+    parser.add_argument(
+        "--offset-from-onset",
+        action="store_true",
+        help="Measure each grasp's offset over its first --onset frames only, skipping the "
+        "grasp-wide vote. The vote trusts whichever frames agree, which is the wrong "
+        "majority when the tracker is biased for most of the grasp.",
+    )
     parser.add_argument("--fill-gap", type=int, default=5, help="Contact gaps up to this are bridged")
     parser.add_argument(
         "--onset",
@@ -265,8 +279,14 @@ def main():
     else:
         print("No --masks-root/--object/--intrinsics: the hand is used across each whole grasp")
 
-    grasps = runs_of(valid & (distance < threshold), args.fill_gap, args.min_grasp)
-    print(f"grasps found: {[(int(a), int(b - 1)) for a, b in grasps] or 'none'}")
+    if args.grasps:
+        grasps = [
+            (int(a), int(b) + 1) for a, b in (window.split("-") for window in args.grasps.split(","))
+        ]
+        print(f"grasps given: {[(a, b - 1) for a, b in grasps]}")
+    else:
+        grasps = runs_of(valid & (distance < threshold), args.fill_gap, args.min_grasp)
+        print(f"grasps found: {[(int(a), int(b - 1)) for a, b in grasps] or 'none'}")
 
     new_rotation, new_position = rotation.copy(), position.copy()
     hand_weight = np.zeros(n_frames)
@@ -283,13 +303,12 @@ def main():
         ))
         agreeing = gaps[int(np.argmax((gaps < args.agree).sum(axis=1)))] < args.agree
         source = "grasp-wide vote"
-        if agreeing.mean() < args.min_agree:
+        if args.offset_from_onset or agreeing.mean() < args.min_agree:
             onset = min(args.onset, len(span))
             spread = np.degrees((in_wrist[0].inv() * in_wrist[:onset]).magnitude())
             if (spread < args.agree).mean() < 0.6:
-                print(f"  {start}-{stop - 1}: no majority over the grasp "
-                      f"({agreeing.mean():.0%} < {args.min_agree:.0%}) and unsteady at "
-                      f"contact, left unchanged")
+                print(f"  {start}-{stop - 1}: unsteady at contact "
+                      f"(grasp-wide agreement {agreeing.mean():.0%}), left unchanged")
                 continue
             agreeing = np.zeros(len(span), dtype=bool)
             agreeing[:onset] = spread < args.agree

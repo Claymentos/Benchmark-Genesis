@@ -59,10 +59,12 @@ def parse_args():
     parser.add_argument("--smooth-window", type=int, default=9)
     parser.add_argument(
         "--smoother",
-        choices=("window", "kalman"),
+        choices=("window", "kalman", "none"),
         default="window",
         help="How the gated per-frame solves are turned into a trajectory: a sliding "
-             "window average, or a constant-velocity Kalman filter with an RTS pass",
+             "window average, a constant-velocity Kalman filter with an RTS pass, or "
+             "none -- gated solves only, gaps left unfilled, for a later stage to smooth "
+             "(e.g. a Kalman filter after a moving camera's motion is composed out)",
     )
     parser.add_argument("--kalman-pos-noise", type=float, default=0.010,
                         help="Position measurement noise, metres (1 sigma)")
@@ -119,11 +121,17 @@ def main():
     print(f"[pose] solved {valid.sum()}/{n_frames} frames from {seeded.sum()} reference points, "
           f"median {np.median(inliers[valid]) if valid.any() else 0:.0f} inliers")
 
+    # Continuity is judged on the tracked points' centroid, not on the translation,
+    # which rotation noise swings far more than the object moves (see gate_poses).
+    centre = source_all[seeded].mean(axis=0)
+    solved = int(valid.sum())
+
     if args.smoother == "kalman":
         # The jump gate first, so a wild solve is never handed to the filter: the
         # filter's own innovation gate is there for the smaller outliers that stay
         # inside a plausible frame-to-frame step, not for wild ones.
-        valid = gate_poses(rotations, translations, valid, args.max_step, args.max_turn)
+        valid = gate_poses(rotations, translations, valid, args.max_step, args.max_turn, centre=centre)
+        print(f"[pose] continuity gate kept {valid.sum()}/{solved} solves")
         rotations, translations, valid = kalman_smooth_poses(
             rotations, translations, valid,
             position_sigma=args.kalman_pos_noise,
@@ -133,10 +141,15 @@ def main():
             gate=args.kalman_gate,
             confidence=inliers.astype(float),
         )
+    elif args.smoother == "none":
+        valid = gate_poses(rotations, translations, valid, args.max_step, args.max_turn, centre=centre)
+        print(f"[pose] continuity gate kept {valid.sum()}/{solved} solves")
     else:
+        kept = gate_poses(rotations, translations, valid, args.max_step, args.max_turn, centre=centre)
+        print(f"[pose] continuity gate kept {kept.sum()}/{solved} solves; the rest are interpolated")
         rotations, translations, valid = clean_poses(
             rotations, translations, valid, args.max_step, args.max_turn, args.smooth_window,
-            confidence=inliers.astype(float),
+            confidence=inliers.astype(float), centre=centre,
         )
     print(f"[pose] {valid.sum()}/{n_frames} frames after dropping implausible jumps and smoothing")
 

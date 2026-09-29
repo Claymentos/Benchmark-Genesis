@@ -14,6 +14,7 @@ The pipeline scripts activate the right env for each stage.
 reconstruction/
 ├── run_v2s2r_pipeline.sh                    # main pipeline (Video2Sim2Real)
 ├── run_reconstruction_pipeline_cotracker.sh # CoTracker/Kabsch variant + grasp refinement
+├── run_touchanything_pipeline.sh            # TouchAnything: moving camera, mocap MANO hands
 ├── launch.sh                                # re-run one take with chosen stages skipped
 ├── config/
 │   ├── paths.sh                 # env names, external checkouts, checkpoints, GPU
@@ -129,6 +130,47 @@ Uses CoTracker points lifted with depth for the object trajectory, then Lightnin
 Grasp at the grasp windows, grasp refinement under SuperDex, and a Genesis replay. It
 also computes SAM 3D point maps checked against ZED depth. `launch.sh` re-runs it on
 one take with the slow stages skipped.
+
+### TouchAnything: moving camera + mocap hands (`run_touchanything_pipeline.sh`)
+
+TouchAnything episodes (`touchanything/<scene>/<task>/<episode>/`) have a head-mounted
+camera (`chest.mp4`) that moves during the task. The hands are measured by Rokoko gloves
+registered to Vive trackers (`rokoko_hands.json`). There is no camera calibration, and
+the camera is not rigid to the chest tracker. This pipeline reconstructs both hands as
+MANO meshes and the object from CoTracker points. It uses no HaWoR, no Wuji
+retargeting, no keyframes and no grasp refinement.
+
+```bash
+./run_touchanything_pipeline.sh touchanything/Workbench/pick_up_screwdriver/20260321_103227_213 \
+    human_videos/touchanything/pick_up_screwdriver_103227 screwdriver 0
+```
+
+- Camera motion: CoTracker points on the static table, lifted with MoGe depth, then
+  Kabsch to the reference frame. Everything is expressed in the reference camera.
+- Mocap placement (`touchanything_hands.py`): one similarity from the Vive world to the
+  reference camera, fitted on WiLoR 2D joints plus depth over all frames. When its scale
+  is not about 1, the depth and the camera track are rescaled into the mocap's metres
+  (`scale_depth.py`) and the hands refitted. Check `hands_overlay_cotracker.mp4`.
+- Object: CoTracker points on the object, lifted, then Kabsch (`pose_from_points.py
+  --smoother none`), composed with the camera motion (`compose_camera_motion.py`), then
+  a constant-velocity Kalman filter with an RTS pass on the object's centre and rotation
+  (`kalman_object_traj.py`). `OBJECT_SMOOTHER=window` uses the old sliding window.
+- Object mesh: RecGen through `run_recgen.py --no-mask-erosion`. RecGen's default 2 px
+  mask erosion deletes thin parts (it removed a 3-4 px screwdriver shaft entirely);
+  `RECGEN_EROSION=1` restores it.
+- Hands: MANO fitted to the 21 joints of each hand (`mano_from_mocap.py`, `ecfit` env).
+  The fit also writes the hand as 16 rigid parts that follow their joints, for physics.
+- Replay (`replay_hands_genesis.py`): kinematic, table at z = 0. The video shows the
+  input, the scene rendered from the real moving camera, and an orbit view. The hands
+  are drawn as the skinned mesh. `HAND_RENDER=parts` shows the rigid parts instead,
+  which crack open at the joints (up to 5 cm at the thumb base).
+- `TABLE_POINTS="x,y;..."` prompts SAM3 for the table when the text prompt misses it.
+- `HELD_WINDOW=A-B` (off by default) slides the held object along its camera ray to the
+  fist's depth (`snap_depth_to_hand.py`): monocular depth puts a small held object
+  several centimetres off the hand.
+
+`run_v2s2r_pipeline.sh` also accepts `MOVING_CAMERA=1 MOCAP_EPISODE=<episode>` for the
+Wuji-retargeted variant, with keyframe grasp refinement.
 
 ### Resuming and skipping stages
 

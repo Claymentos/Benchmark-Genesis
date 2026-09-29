@@ -166,7 +166,7 @@ def smooth_on_manifold(translations, rotations, window, confidence=None):
     return smoothed_translations, Rotation.concatenate(smoothed_rotations)
 
 
-def gate_poses(rotations, translations, valid, max_step, max_turn):
+def gate_poses(rotations, translations, valid, max_step, max_turn, centre=None):
     """Drop frames whose solved pose cannot follow from the one before it.
 
     A near-cylindrical, textureless object leaves rotation about its axis weakly
@@ -176,6 +176,13 @@ def gate_poses(rotations, translations, valid, max_step, max_turn):
     Continuity, not distance from a reference pose: the object legitimately travels
     far (here the mug is lifted and set back down), so only an implausible jump
     between neighbouring frames indicates a bad solve.
+
+    With `centre` (a point on the object, reference-frame coordinates) the step is
+    measured on where that point goes, R c + t, rather than on t. The translation is
+    the motion of a frame ~1 m away at the camera, so a few degrees of rotation noise
+    swing it by more than max_step while the object stays put: on a TouchAnything
+    clip the translation stepped 18.8 cm per frame (median) against 1.9 cm for the
+    centre, and gating on it kept 55 of 223 solves instead of 161.
     """
     from scipy.spatial.transform import Rotation
 
@@ -183,6 +190,8 @@ def gate_poses(rotations, translations, valid, max_step, max_turn):
     order = np.flatnonzero(valid)
     if len(order) < 3:
         return valid
+    if centre is not None:
+        translations = np.einsum("tij,j->ti", rotations, np.asarray(centre, dtype=float)) + translations
 
     anchor = order[0]
     for index in order[1:]:
@@ -198,11 +207,12 @@ def gate_poses(rotations, translations, valid, max_step, max_turn):
     return valid
 
 
-def clean_poses(rotations, translations, valid, max_step, max_turn, smooth_window, confidence=None):
+def clean_poses(rotations, translations, valid, max_step, max_turn, smooth_window, confidence=None,
+                centre=None):
     """Drop physically impossible frames, then interpolate and smooth what remains."""
     from scipy.spatial.transform import Rotation, Slerp
 
-    valid = gate_poses(rotations, translations, valid, max_step, max_turn)
+    valid = gate_poses(rotations, translations, valid, max_step, max_turn, centre=centre)
     order = np.flatnonzero(valid)
     if len(order) < 3:
         return rotations, translations, valid

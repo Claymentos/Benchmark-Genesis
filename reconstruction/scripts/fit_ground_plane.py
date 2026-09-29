@@ -71,7 +71,12 @@ def main():
     # Refit on the inliers: the minimum-variance direction of the supporting points
     # is a far better normal than the one from the three-point sample that found them.
     normal = np.linalg.svd(centred, full_matrices=False)[2][2]
-    if normal[1] > 0:  # camera y points down, so up has negative y
+    # Up is the side the camera is on: the camera always looks down onto the supporting
+    # surface. Taking the sign from camera y ("y points down, so up has negative y")
+    # agrees for an oblique view but is arbitrary for a camera looking straight down,
+    # where the normal is nearly the optical axis -- on a TouchAnything head camera
+    # (pitch 89.5 deg) it put the table's up pointing away from the camera.
+    if normal @ points[inliers].mean(axis=0) > 0:
         normal = -normal
     offset = -normal @ points[inliers].mean(axis=0)
 

@@ -182,6 +182,14 @@ def main():
         object_quats = np.tile(to_quat_wxyz(cam_to_world), (len(solved), 1))
         object_quats[solved] = to_quat_wxyz(object_rotations[solved])
         object_poses = (object_quats, tracked["translation"] @ cam_to_world.T, solved)
+        # Where the object actually is, for framing. The translation alone is not: it is
+        # the rigid motion of a mesh posed ~1 m from the camera, so any rotation swings
+        # it by tens of centimetres while the object itself barely moves.
+        object_centres = None
+        if object_vertices is not None:
+            centre_cam = object_vertices.mean(axis=0) @ cam_to_world
+            object_centres = np.einsum("ij,tjk,k->ti", cam_to_world, tracked["rotation"], centre_cam)
+            object_centres += object_poses[1]
         # Under --physics the object is placed once and is an outcome from there, so the
         # frame it is placed at sets up everything after it. The first solved frame is
         # usually frame 0, which leaves the object settling under gravity for the whole
@@ -303,7 +311,8 @@ def main():
             # The object leaves the reference-frame footprint once it is lifted, so
             # frame on where it actually travels.
             _, translations_w, solved = object_poses
-            framed = np.vstack([framed, translations_w[solved] + shift])
+            travelled = translations_w if object_centres is None else object_centres
+            framed = np.vstack([framed, travelled[solved] + shift])
         centre = framed.mean(axis=0)
         distance = args.camera_distance
         if distance is None:
